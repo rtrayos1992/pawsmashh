@@ -1,0 +1,1299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Paw Smash — Play for Strays</title>
+  <!-- React 18 -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel Standalone: transpiles JSX in the browser -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0d0a0b; }
+    select, select option { background: #2a1520 !important; color: #fff !important; }
+    select { color-scheme: dark; }
+    input[type=number]::-webkit-inner-spin-button { opacity: 0.4; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" data-presets="react">
+    const { useState, useMemo, useCallback } = React;
+
+
+/* ══════════════════════════════════════════════════════
+   THEME & CONSTANTS
+══════════════════════════════════════════════════════ */
+const C = {
+  bg:"#0d0a0b", surface:"#1a1014", card:"#221518", border:"#3a1f25",
+  pink:"#e91e8c", pinkLight:"#f472b6", pinkDim:"#c0185c",
+  white:"#fff",  muted:"#a07080",   faint:"#3d2030",
+};
+const LEVEL_OPTIONS = ["B","C","D","E"];
+const LEVEL_META = {
+  B:{ label:"Elite",        gradient:"linear-gradient(135deg,#FFD700,#FFA500)", text:"#1a1a1a", color:"#FFA500" },
+  C:{ label:"Advanced",     gradient:"linear-gradient(135deg,#e0e0e0,#bbb)",   text:"#1a1a1a", color:"#ccc"    },
+  D:{ label:"Intermediate", gradient:"linear-gradient(135deg,#cd7f32,#a0522d)", text:"#fff",    color:"#cd7f32" },
+  E:{ label:"Beginner",     gradient:"linear-gradient(135deg,#e91e8c,#c0185c)", text:"#fff",    color:"#e91e8c" },
+};
+const BRACKET_OPTIONS = [1,2,3,4,5,6,7,8];
+const BKT_COLORS  = ["#e91e8c","#d63077","#c0185c","#f472b6","#ec4899","#be185d","#9d174d","#831843"];
+const COURT_COLORS= ["#e91e8c","#d63077","#3498db","#2980b9","#2ecc71","#27ae60","#1abc9c"];
+
+const START_MINUTES  = 17 * 60;   // 5 PM
+const END_MINUTES    = 22 * 60;   // 10 PM
+const MATCH_DURATION = 20;
+const TOTAL_COURTS   = 7;
+const LEVEL_COURTS   = { E:[1,2], D:[3,4], C:[5,6,7] };
+
+
+
+/* ══════════════════════════════════════════════════════
+   UTILITY FUNCTIONS
+══════════════════════════════════════════════════════ */
+function minutesToTime(m) {
+  const h=Math.floor(m/60), min=m%60, ampm=h>=12?"PM":"AM";
+  const h12 = h > 12 ? h-12 : h === 0 ? 12 : h;
+  return `${h12}:${String(min).padStart(2,"0")} ${ampm}`;
+}
+function uid() { return Math.random().toString(36).substr(2,9); }
+
+function generateRR(teams) {
+  if (teams.length < 2) return [];
+  const t = [...teams];
+  if (t.length % 2 !== 0) t.push(null);
+  const n = t.length, out = [];
+  for (let r = 0; r < n-1; r++) {
+    for (let i = 0; i < n/2; i++) {
+      const h = t[i], a = t[n-1-i];
+      if (h && a) out.push({ id:uid(), home:h, away:a, round:r+1 });
+    }
+    t.splice(1, 0, t.pop());
+  }
+  return out;
+}
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function buildSchedule(teams) {
+  // 1. Build RR match lists per group
+  const groups = {};
+  LEVEL_OPTIONS.forEach(l => BRACKET_OPTIONS.forEach(b => {
+    const grp = teams.filter(t => t.level===l && t.bracket===b);
+    if (grp.length >= 2) groups[`${l}-${b}`] = generateRR(grp);
+  }));
+
+  // 2. Assign courts / times — shuffle per level so brackets are interleaved
+  const courtFree = {};
+  for (let c = 1; c <= TOTAL_COURTS; c++) courtFree[c] = START_MINUTES;
+  const out = [];
+
+  function assign(list, courts) {
+    shuffle(list).forEach(m => {
+      let best = courts[0], bt = courtFree[courts[0]];
+      courts.forEach(c => { if (courtFree[c] < bt) { bt=courtFree[c]; best=c; } });
+      const s = Math.max(bt, START_MINUTES);
+      courtFree[best] = s + MATCH_DURATION;
+      out.push({ ...m, court:best, startMin:s, endMin:s+MATCH_DURATION });
+    });
+  }
+
+  ["E","D","C"].forEach(lv => assign(
+    Object.keys(groups).filter(k=>k.startsWith(lv))
+      .flatMap(k => groups[k].map(m => ({ ...m, level:lv, bracket:Number(k.split("-")[1]) }))),
+    LEVEL_COURTS[lv]
+  ));
+  assign(
+    Object.keys(groups).filter(k=>k.startsWith("B"))
+      .flatMap(k => groups[k].map(m => ({ ...m, level:"B", bracket:Number(k.split("-")[1]) }))),
+    [1,2,3,4,5,6,7]
+  );
+  return out;
+}
+
+function computeStandings(teams, matches, matchStates) {
+  return [...teams].map(t => {
+    const games = matches.filter(m => m.home.id===t.id || m.away.id===t.id);
+    const played = games.filter(m => matchStates[m.id]?.winner).length;
+    const wins   = games.filter(m => {
+      const s = matchStates[m.id];
+      return s && ((m.home.id===t.id && s.winner==="home") || (m.away.id===t.id && s.winner==="away"));
+    }).length;
+    const losses = games.filter(m => {
+      const s = matchStates[m.id];
+      return s && ((m.home.id===t.id && s.winner==="away") || (m.away.id===t.id && s.winner==="home"));
+    }).length;
+    const pf = games.reduce((acc,m) => {
+      const s = matchStates[m.id]; if (!s?.winner) return acc;
+      return acc + Number(m.home.id===t.id ? s.scoreHome||0 : s.scoreAway||0);
+    }, 0);
+    const pa = games.reduce((acc,m) => {
+      const s = matchStates[m.id]; if (!s?.winner) return acc;
+      return acc + Number(m.home.id===t.id ? s.scoreAway||0 : s.scoreHome||0);
+    }, 0);
+    return { team:t, played, wins, losses, pf, pa };
+  }).sort((a,b) => b.wins - a.wins || (b.pf-b.pa) - (a.pf-a.pa));
+}
+
+/* ══════════════════════════════════════════════════════
+   INITIAL TEAMS DATA
+══════════════════════════════════════════════════════ */
+const INITIAL_TEAMS = [
+  // Level E – Bracket 1
+  {id:uid(),level:"E",bracket:1,player1:"Jenn Danganan",       player2:"Kathreen Ydel",          name:""},
+  {id:uid(),level:"E",bracket:1,player1:"Patricia Luta",        player2:"Ceferino Luta 3",        name:""},
+  {id:uid(),level:"E",bracket:1,player1:"Xian Carlo Bangate",   player2:"Xyrille",                name:""},
+  {id:uid(),level:"E",bracket:1,player1:"Ruth Partida",         player2:"Mark Marasigan",         name:""},
+  {id:uid(),level:"E",bracket:1,player1:"Jessie De Guzman",     player2:"Shiena Hernandez",       name:""},
+  // Level E – Bracket 2
+  {id:uid(),level:"E",bracket:2,player1:"Jason Cansino",        player2:"Kaye Cansino",           name:""},
+  {id:uid(),level:"E",bracket:2,player1:"Robin Vicente",        player2:"Ram Mendoza",            name:""},
+  {id:uid(),level:"E",bracket:2,player1:"Kalvin Dacusin",       player2:"Paul Anatalio",          name:""},
+  {id:uid(),level:"E",bracket:2,player1:"Apollo",               player2:"Cousin",                 name:""},
+  // Level D – Bracket 1
+  {id:uid(),level:"D",bracket:1,player1:"Ralph Lopez",          player2:"Rick Diaz",              name:""},
+  {id:uid(),level:"D",bracket:1,player1:"Calbert",              player2:"Kiel Mabeza",            name:""},
+  {id:uid(),level:"D",bracket:1,player1:"Matthew Mirallosa",    player2:"Venice Mariel Develos",  name:""},
+  {id:uid(),level:"D",bracket:1,player1:"Anthony Longasa",      player2:"Joshua Sandova",         name:""},
+  // Level D – Bracket 2
+  {id:uid(),level:"D",bracket:2,player1:"Jaymi Chow",           player2:"Juramer Itlanas",        name:""},
+  {id:uid(),level:"D",bracket:2,player1:"Ariadne Denzon",       player2:"Arlene Denzon",          name:""},
+  {id:uid(),level:"D",bracket:2,player1:"Franjet",              player2:"Thea",                   name:""},
+  {id:uid(),level:"D",bracket:2,player1:"Jean Lee",             player2:"Mike Arevalo",           name:""},
+  // Level D – Bracket 3
+  {id:uid(),level:"D",bracket:3,player1:"Mimoy De Jesus",       player2:"Jayce Mamauag",          name:""},
+  {id:uid(),level:"D",bracket:3,player1:"Sheda Manota",         player2:"Rj Rayos",               name:""},
+  {id:uid(),level:"D",bracket:3,player1:"Jamaica Takahashi",    player2:"Leonard Medrano",        name:""},
+  {id:uid(),level:"D",bracket:3,player1:"Jason Oliver Lim",     player2:"Janella Dela Cruz",      name:""},
+  // Level D – Bracket 4
+  {id:uid(),level:"D",bracket:4,player1:"Bea Santos",           player2:"Christone Mallari",      name:""},
+  {id:uid(),level:"D",bracket:4,player1:"Claro Ebette",         player2:"Ruth Partida",           name:""},
+  {id:uid(),level:"D",bracket:4,player1:"Arielle Anchote",      player2:"Arnold Abucejo",         name:""},
+  {id:uid(),level:"D",bracket:4,player1:"Jozshelle Cruz",       player2:"Benjo Cruz",             name:""},
+  // Level C – Brackets 1-8
+  {id:uid(),level:"C",bracket:1,player1:"JayJay",               player2:"Bhem",                   name:""},
+  {id:uid(),level:"C",bracket:1,player1:"Sunitha Zenith Flores",player2:"Mckheizer Oyales",       name:""},
+  {id:uid(),level:"C",bracket:1,player1:"Rizza",                player2:"Simeon",                 name:""},
+  {id:uid(),level:"C",bracket:1,player1:"Louie",                player2:"Harvey",                 name:""},
+  {id:uid(),level:"C",bracket:2,player1:"Crivelli Gispin",      player2:"Kevin Badilla",          name:""},
+  {id:uid(),level:"C",bracket:2,player1:"Glenn Teves",          player2:"Jay AR",                 name:""},
+  {id:uid(),level:"C",bracket:2,player1:"Jhoven Roldan",        player2:"Mark Steven Quinto",     name:""},
+  {id:uid(),level:"C",bracket:2,player1:"Prince Jeuf Camuta",   player2:"Zyrille Camuta",         name:""},
+  {id:uid(),level:"C",bracket:3,player1:"MJ Royo",              player2:"Doc JC",                 name:""},
+  {id:uid(),level:"C",bracket:3,player1:"Keith Suallo",         player2:"Jan Kristian Mirabel",   name:""},
+  {id:uid(),level:"C",bracket:3,player1:"Krissy",               player2:"Mark Leosala",           name:""},
+  {id:uid(),level:"C",bracket:3,player1:"Ronie Gaje",           player2:"Diane Patron",           name:""},
+  {id:uid(),level:"C",bracket:4,player1:"Ken Cotoner",          player2:"James Duran",            name:""},
+  {id:uid(),level:"C",bracket:4,player1:"Lily Camat",           player2:"Jeff Orbegoso",          name:""},
+  {id:uid(),level:"C",bracket:4,player1:"Allan Tamayo",         player2:"Cristina Trabal",        name:""},
+  {id:uid(),level:"C",bracket:4,player1:"Paul Esquillon",       player2:"Rose Lyn Villanueva",    name:""},
+  {id:uid(),level:"C",bracket:5,player1:"Jerald Tuliao",        player2:"Deuzette De Dios",       name:""},
+  {id:uid(),level:"C",bracket:5,player1:"Oliver Cesumission",   player2:"Jameela Cruz",           name:""},
+  {id:uid(),level:"C",bracket:5,player1:"Barbie Macaraeg",      player2:"Nom",                    name:""},
+  {id:uid(),level:"C",bracket:5,player1:"Xena Bugayong",        player2:"Oliver Jed Balgos",      name:""},
+  {id:uid(),level:"C",bracket:6,player1:"Ivan Canlas",          player2:"Charlson Tolentino",     name:""},
+  {id:uid(),level:"C",bracket:6,player1:"Jeffrey Carillo",      player2:"Rex Mabeza",             name:""},
+  {id:uid(),level:"C",bracket:6,player1:"Bion Henrik Priolo",   player2:"Jason Andrew Naraval",   name:""},
+  {id:uid(),level:"C",bracket:6,player1:"Jeric Brioso",         player2:"RK Ocampo",              name:""},
+  {id:uid(),level:"C",bracket:7,player1:"Bea Cegama Santos",    player2:"Paul Benjamin Lauzon",   name:""},
+  {id:uid(),level:"C",bracket:7,player1:"Tony Rose Dacdac",     player2:"Kean Johan Salangsang",  name:""},
+  {id:uid(),level:"C",bracket:7,player1:"Kat Alberto",          player2:"Dominic Alberto",        name:""},
+  {id:uid(),level:"C",bracket:7,player1:"Jay R Cabatas",        player2:"Anne Matias",            name:""},
+  {id:uid(),level:"C",bracket:8,player1:"John Etom",            player2:"Jonathan Santelices",    name:""},
+  {id:uid(),level:"C",bracket:8,player1:"Sean Paul Jimenez",    player2:"Isiah Lawrence Quitoras",name:""},
+  {id:uid(),level:"C",bracket:8,player1:"Arthur Reyes",         player2:"Rowie Jane Nuval",       name:""},
+  {id:uid(),level:"C",bracket:8,player1:"Papi",                 player2:"Aaron",                  name:""},
+  // Level B – Brackets 1-3
+  {id:uid(),level:"B",bracket:1,player1:"Denver De Guzman",     player2:"Fritz Collado",          name:""},
+  {id:uid(),level:"B",bracket:1,player1:"Joshua Justo",         player2:"Cheng",                  name:""},
+  {id:uid(),level:"B",bracket:1,player1:"Rick Diaz",            player2:"Paul Lauzon",            name:""},
+  {id:uid(),level:"B",bracket:1,player1:"JayJay",               player2:"Louie",                  name:""},
+  {id:uid(),level:"B",bracket:2,player1:"Aniel Belaos",         player2:"Franz Datu",             name:""},
+  {id:uid(),level:"B",bracket:2,player1:"Ricky",                player2:"Angelo",                 name:""},
+  {id:uid(),level:"B",bracket:2,player1:"Jap Pasion",           player2:"Mckheizer Oyales",       name:""},
+  {id:uid(),level:"B",bracket:2,player1:"Mj",                   player2:"Lg",                     name:""},
+  {id:uid(),level:"B",bracket:3,player1:"Paul Esquillon",       player2:"Kean Johan Salangsang",  name:""},
+  {id:uid(),level:"B",bracket:3,player1:"Jay R Cabatas",        player2:"Rj Rayos",               name:""},
+  {id:uid(),level:"B",bracket:3,player1:"Mark Leosala",         player2:"Andrew",                 name:""},
+  {id:uid(),level:"B",bracket:3,player1:"Nick",                 player2:"Charlson",               name:""},
+];
+
+/* ══════════════════════════════════════════════════════
+   SHARED STYLES
+══════════════════════════════════════════════════════ */
+const SEL = {
+  background:"#2a1520", border:"1px solid #3a1f25", borderRadius:8,
+  padding:"9px 12px", color:"#fff", fontSize:14, outline:"none",
+  fontFamily:"'DM Sans',sans-serif", width:"100%", boxSizing:"border-box",
+};
+const primaryBtn = {
+  background:"linear-gradient(135deg,#e91e8c,#c0185c)", border:"none",
+  borderRadius:10, padding:"10px 22px", color:"#fff", fontWeight:800,
+  cursor:"pointer", fontSize:14, letterSpacing:1,
+  fontFamily:"'Fredoka One',sans-serif", boxShadow:"0 4px 20px #e91e8c55",
+  transition:"all 0.2s",
+};
+const secondaryBtn = {
+  background:"rgba(233,30,140,0.08)", border:"1px solid #3a1f25",
+  borderRadius:10, padding:"10px 22px", color:"#a07080",
+  fontWeight:600, cursor:"pointer", fontSize:14,
+};
+const labelSt = {
+  display:"block", color:"#a07080", fontSize:12,
+  marginBottom:5, fontWeight:600, letterSpacing:0.5,
+};
+function iBtn(color){ return { background:`${color}22`, border:`1px solid ${color}55`, color, borderRadius:6, width:28, height:28, cursor:"pointer", fontSize:13, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }; }
+
+/* ══════════════════════════════════════════════════════
+   SHARED UI COMPONENTS
+══════════════════════════════════════════════════════ */
+function PawSmashLogo() {
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:10}}>
+      <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+        <rect width="48" height="48" rx="12" fill="#1a1014"/>
+        <ellipse cx="24" cy="30" rx="9" ry="11" fill="url(#pawGrad)"/>
+        <ellipse cx="14" cy="20" rx="4" ry="5.5" fill="#f472b6"/>
+        <ellipse cx="24" cy="16" rx="4" ry="5.5" fill="#f472b6"/>
+        <ellipse cx="34" cy="20" rx="4" ry="5.5" fill="#f472b6"/>
+        <defs>
+          <linearGradient id="pawGrad" x1="15" y1="19" x2="33" y2="41">
+            <stop offset="0%" stopColor="#f472b6"/>
+            <stop offset="100%" stopColor="#c0185c"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <div>
+        <div style={{fontFamily:"'Fredoka One',cursive",fontSize:26,lineHeight:1,letterSpacing:1}}>
+          <span style={{background:"linear-gradient(135deg,#f472b6,#e91e8c)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Paw</span>
+          <span style={{color:"#fff"}}>Smash</span>
+        </div>
+        <div style={{fontSize:9,letterSpacing:3,color:"#e91e8c",fontWeight:700,fontFamily:"'DM Sans',sans-serif",marginTop:1}}>PLAY FOR STRAYS</div>
+      </div>
+    </div>
+  );
+}
+
+function PawBg() {
+  const paws=[{x:5,y:8,s:60,o:0.04,r:20},{x:85,y:5,s:45,o:0.03,r:-15},{x:50,y:88,s:70,o:0.03,r:40},{x:90,y:65,s:50,o:0.04,r:-30},{x:12,y:52,s:40,o:0.03,r:10},{x:68,y:38,s:55,o:0.025,r:-20}];
+  return (
+    <svg style={{position:"fixed",inset:0,width:"100%",height:"100%",pointerEvents:"none",zIndex:0}} preserveAspectRatio="none">
+      {paws.map((p,i) => (
+        <g key={i} transform={`translate(${p.x}%,${p.y}%) rotate(${p.r})`} opacity={p.o}>
+          <ellipse cx="0" cy={p.s*0.2}  rx={p.s*0.14} ry={p.s*0.18} fill="#e91e8c"/>
+          <ellipse cx={-p.s*0.18} cy={-p.s*0.05} rx={p.s*0.07} ry={p.s*0.1} fill="#e91e8c"/>
+          <ellipse cx="0" cy={-p.s*0.16} rx={p.s*0.07} ry={p.s*0.1} fill="#e91e8c"/>
+          <ellipse cx={p.s*0.18} cy={-p.s*0.05}  rx={p.s*0.07} ry={p.s*0.1} fill="#e91e8c"/>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function EmptyState({ msg }) {
+  return (
+    <div style={{textAlign:"center",color:C.muted,padding:"44px 20px"}}>
+      <div style={{fontSize:44,marginBottom:10}}>🐾</div>
+      <div style={{fontSize:14}}>{msg}</div>
+    </div>
+  );
+}
+
+function Modal({ title, onClose, children }) {
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onClose}>
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:18,padding:28,width:"100%",maxWidth:500,maxHeight:"90vh",overflowY:"auto",boxShadow:`0 0 60px ${C.pink}33`}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <h3 style={{margin:0,color:C.white,fontSize:18,fontFamily:"'Fredoka One',sans-serif",letterSpacing:1}}>{title}</h3>
+          <button onClick={onClose} style={{background:"none",border:"none",color:C.muted,fontSize:20,cursor:"pointer"}}>✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function LevelBadge({ level, size=11 }) {
+  const lm = LEVEL_META[level] || LEVEL_META.E;
+  return <span style={{background:lm.gradient,color:lm.text,borderRadius:5,padding:`1px ${size-2}px`,fontSize:size,fontWeight:800,fontFamily:"'Fredoka One',sans-serif",letterSpacing:1,flexShrink:0}}>{level}</span>;
+}
+function BktBadge({ bracket, size=11 }) {
+  const bc = BKT_COLORS[(bracket-1)%BKT_COLORS.length];
+  return <span style={{background:`${bc}33`,color:bc,border:`1px solid ${bc}66`,borderRadius:5,padding:`1px ${size-2}px`,fontSize:size,fontWeight:700,flexShrink:0}}>B{bracket}</span>;
+}
+
+/* ══════════════════════════════════════════════════════
+   TEAM FORM & CARD
+══════════════════════════════════════════════════════ */
+function TeamForm({ initial, onSave, onCancel, levels, brackets }) {
+  const [form, setForm] = useState(initial || { player1:"", player2:"", name:"", level:levels[0], bracket:brackets[0] });
+  const set = (k,v) => setForm(f => ({...f,[k]:v}));
+  const valid = form.player1.trim() && form.player2.trim();
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      {[["player1","Player 1 🏸"],["player2","Player 2 🏸"],["name","Team Name (optional)"]].map(([k,lbl]) => (
+        <div key={k}>
+          <label style={labelSt}>{lbl}</label>
+          <input value={form[k]} onChange={e=>set(k,e.target.value)} style={{...SEL}} placeholder={lbl}/>
+        </div>
+      ))}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        <div>
+          <label style={labelSt}>Level</label>
+          <select value={form.level} onChange={e=>set("level",e.target.value)} style={SEL}>
+            {levels.map(l => <option key={l} value={l}>{l} — {LEVEL_META[l]?.label||l}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={labelSt}>Bracket</label>
+          <select value={form.bracket} onChange={e=>set("bracket",Number(e.target.value))} style={SEL}>
+            {brackets.map(b => <option key={b} value={b}>Bracket {b}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:10,marginTop:4}}>
+        <button onClick={() => valid && onSave(form)} style={{...primaryBtn,opacity:valid?1:0.5}}>🐾 Save Team</button>
+        <button onClick={onCancel} style={secondaryBtn}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function TeamCard({ team, onEdit, onDelete }) {
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"11px 16px",display:"flex",alignItems:"center",gap:10,marginBottom:7}}>
+      <div style={{display:"flex",gap:6,flexShrink:0}}>
+        <LevelBadge level={team.level}/>
+        <BktBadge bracket={team.bracket}/>
+      </div>
+      <div style={{flex:1}}>
+        <div style={{fontWeight:700,fontSize:14,color:C.white}}>🐾 {team.player1} & {team.player2}</div>
+        {team.name && <div style={{fontSize:11,color:C.muted,marginTop:1}}>{team.name}</div>}
+      </div>
+      {onEdit   && <button onClick={()=>onEdit(team)}    style={iBtn(C.pinkLight)}>✎</button>}
+      {onDelete && <button onClick={()=>onDelete(team.id)} style={iBtn("#e74c3c")}>✕</button>}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════
+   TEAMS VIEW
+══════════════════════════════════════════════════════ */
+function TeamsView({ teams, setTeams, levels, brackets, setModal, setEditTeam }) {
+  const [search, setSearch] = useState("");
+  const [fL, setFL] = useState("ALL");
+  const [fB, setFB] = useState("ALL");
+  const filtered = teams.filter(t => {
+    const q = search.toLowerCase();
+    return (
+      (!q || t.player1.toLowerCase().includes(q) || t.player2.toLowerCase().includes(q)) &&
+      (fL==="ALL" || t.level===fL) &&
+      (fB==="ALL" || t.bracket===Number(fB))
+    );
+  });
+  return (
+    <div>
+      {/* Summary pills */}
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:20}}>
+        {LEVEL_OPTIONS.map(l => {
+          const lm = LEVEL_META[l], cnt = teams.filter(t=>t.level===l).length;
+          return (
+            <div key={l} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"6px 14px",display:"flex",alignItems:"center",gap:8}}>
+              <span style={{background:lm.gradient,color:lm.text,borderRadius:5,padding:"1px 8px",fontSize:11,fontWeight:800,fontFamily:"'Fredoka One',sans-serif"}}>{l}</span>
+              <span style={{color:C.white,fontWeight:700,fontSize:16,fontFamily:"'Fredoka One',sans-serif"}}>{cnt}</span>
+              <span style={{color:C.muted,fontSize:11}}>pairs</span>
+            </div>
+          );
+        })}
+        <button onClick={()=>setModal("add")} style={{...primaryBtn,marginLeft:"auto"}}>🐾 Add Team</button>
+      </div>
+      {/* Search */}
+      <div style={{position:"relative",marginBottom:12}}>
+        <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:C.muted}}>🔍</span>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search players..." style={{...SEL,paddingLeft:34}}/>
+        {search && <button onClick={()=>setSearch("")} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:C.muted,cursor:"pointer"}}>✕</button>}
+      </div>
+      {/* Filters */}
+      <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+        <select value={fL} onChange={e=>setFL(e.target.value)} style={{...SEL,width:"auto",padding:"6px 12px",fontSize:12}}>
+          <option value="ALL">All Levels</option>
+          {levels.map(l => <option key={l} value={l}>Level {l} – {LEVEL_META[l].label}</option>)}
+        </select>
+        <select value={fB} onChange={e=>setFB(e.target.value)} style={{...SEL,width:"auto",padding:"6px 12px",fontSize:12}}>
+          <option value="ALL">All Brackets</option>
+          {brackets.map(b => <option key={b} value={b}>Bracket {b}</option>)}
+        </select>
+        <span style={{color:C.muted,fontSize:12}}>{filtered.length} of {teams.length}</span>
+      </div>
+      {filtered.length===0 && <EmptyState msg="No teams match your search."/>}
+      {filtered.map(t => <TeamCard key={t.id} team={t} onEdit={setEditTeam} onDelete={id=>setTeams(prev=>prev.filter(x=>x.id!==id))}/>)}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════
+   BRACKET VIEW
+══════════════════════════════════════════════════════ */
+function BracketView({ teams, levels, brackets }) {
+  const grouped = {};
+  levels.forEach(l => { grouped[l]={}; brackets.forEach(b => { grouped[l][b]=[]; }); });
+  teams.forEach(t => { if (grouped[t.level]?.[t.bracket]) grouped[t.level][t.bracket].push(t); });
+  if (!teams.length) return <EmptyState msg="No teams yet."/>;
+  return (
+    <div>
+      {levels.map(lv => {
+        const hasAny = brackets.some(b => grouped[lv]?.[b]?.length > 0);
+        if (!hasAny) return null;
+        const lm = LEVEL_META[lv];
+        return (
+          <div key={lv} style={{marginBottom:32}}>
+            <div style={{display:"inline-flex",alignItems:"center",gap:10,marginBottom:16,background:C.faint,border:`1px solid ${C.border}`,borderRadius:12,padding:"8px 18px"}}>
+              <span style={{background:lm.gradient,color:lm.text,borderRadius:7,padding:"3px 14px",fontWeight:900,fontSize:18,fontFamily:"'Fredoka One',sans-serif",letterSpacing:2}}>LEVEL {lv}</span>
+              <span style={{color:C.pinkLight,fontSize:12,fontWeight:600}}>{lm.label}</span>
+              <span style={{color:C.muted,fontSize:11}}>{teams.filter(t=>t.level===lv).length} pairs</span>
+              {LEVEL_COURTS[lv] && <span style={{color:C.muted,fontSize:11}}>· Courts {LEVEL_COURTS[lv].join(", ")}</span>}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:14}}>
+              {brackets.map(b => {
+                const bT = grouped[lv][b];
+                if (!bT?.length) return null;
+                const bc = BKT_COLORS[(b-1)%BKT_COLORS.length];
+                return (
+                  <div key={b} style={{background:C.card,border:`1px solid ${bc}44`,borderRadius:14,padding:16}}>
+                    <div style={{color:bc,fontWeight:800,fontSize:13,marginBottom:10,fontFamily:"'Fredoka One',sans-serif",display:"flex",alignItems:"center",gap:6}}>
+                      🎯 BRACKET {b} <span style={{color:C.muted,fontWeight:400,fontSize:11}}>({bT.length} pairs)</span>
+                    </div>
+                    {bT.map((t,i) => (
+                      <div key={t.id} style={{fontSize:13,color:"#ddd",padding:"5px 0",borderBottom:i<bT.length-1?`1px solid ${C.faint}`:"none",display:"flex",gap:6}}>
+                        <span style={{color:C.muted,fontSize:10,minWidth:16,paddingTop:1}}>{i+1}.</span>
+                        🐾 {t.player1} & {t.player2}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════
+   MATCH CARD (Round Robin / Schedule)
+══════════════════════════════════════════════════════ */
+function MatchCard({ match, matchState, onUpdate }) {
+  const { home, away, court, startMin, level, bracket } = match;
+  const { scoreHome="", scoreAway="", winner=null } = matchState || {};
+  const lm = LEVEL_META[level] || LEVEL_META.E;
+  const cc = COURT_COLORS[(court-1) % COURT_COLORS.length];
+  const isLate = startMin >= END_MINUTES;
+  const numInput = { width:46, background:"rgba(233,30,140,0.12)", border:`1px solid ${C.border}`, borderRadius:7, padding:"5px 4px", color:C.white, fontSize:17, fontWeight:800, textAlign:"center", outline:"none", fontFamily:"'Fredoka One',sans-serif" };
+  return (
+    <div style={{background:winner?`${C.pink}12`:C.surface,border:`1px solid ${winner?C.pink+"55":isLate?"rgba(231,76,60,0.3)":C.border}`,borderRadius:12,padding:"12px 14px",transition:"all 0.2s"}}>
+      {/* Header row */}
+      <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:10}}>
+        <div style={{background:`${cc}33`,border:`1px solid ${cc}66`,borderRadius:7,padding:"2px 9px",fontFamily:"'Fredoka One',sans-serif",fontSize:13,color:cc,flexShrink:0}}>C{court}</div>
+        <LevelBadge level={level}/>
+        <BktBadge bracket={bracket}/>
+        <div style={{marginLeft:"auto",fontSize:11,color:isLate?"#e74c3c":C.muted,fontWeight:isLate?700:400,flexShrink:0}}>
+          {minutesToTime(startMin)}{isLate?" ⚠️":""}
+        </div>
+      </div>
+      {/* Teams + scores */}
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <div style={{flex:1}}>
+          <div style={{fontSize:13,color:winner==="home"?C.pink:C.white,fontWeight:winner==="home"?700:400}}>
+            {winner==="home" && "🏆 "}{home.player1} & {home.player2}
+          </div>
+          <div style={{fontSize:11,color:C.muted,margin:"3px 0"}}>vs</div>
+          <div style={{fontSize:13,color:winner==="away"?C.pink:C.white,fontWeight:winner==="away"?700:400}}>
+            {winner==="away" && "🏆 "}{away.player1} & {away.player2}
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+          <input type="number" min="0" max="99" value={scoreHome} onChange={e=>onUpdate({scoreHome:e.target.value})} style={numInput}/>
+          <span style={{color:C.muted,fontSize:12}}>—</span>
+          <input type="number" min="0" max="99" value={scoreAway} onChange={e=>onUpdate({scoreAway:e.target.value})} style={numInput}/>
+        </div>
+      </div>
+      {/* Winner buttons */}
+      <div style={{display:"flex",gap:6,marginTop:10}}>
+        {[["home",home],["away",away]].map(([side,team]) => (
+          <button key={side} onClick={() => onUpdate({winner: winner===side ? null : side})}
+            style={{flex:1,background:winner===side?`${C.pink}33`:"transparent",border:`1px solid ${winner===side?C.pink:C.border}`,borderRadius:7,padding:"5px 8px",color:winner===side?C.pink:C.muted,fontSize:11,cursor:"pointer",fontWeight:winner===side?700:400,transition:"all 0.15s"}}>
+            {team.player1.split(" ")[0]} wins 🐾
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════
+   SCHEDULE VIEW
+══════════════════════════════════════════════════════ */
+function ScheduleView({ teams, schedule, setSchedule, matchStates, updateMatchState }) {
+  const [viewMode,   setViewMode]   = useState("time");
+  const [filterLv,   setFilterLv]   = useState("ALL");
+  const [filterCt,   setFilterCt]   = useState("ALL");
+
+  const generate = () => { if (!schedule.length) setSchedule(buildSchedule(teams)); };
+
+  const filtered = useMemo(() =>
+    schedule.filter(m =>
+      (filterLv==="ALL" || m.level===filterLv) &&
+      (filterCt==="ALL" || m.court===Number(filterCt))
+    ), [schedule, filterLv, filterCt]);
+
+  const lateCount = useMemo(() => schedule.filter(m=>m.endMin>END_MINUTES).length, [schedule]);
+  const doneCount = useMemo(() => schedule.filter(m=>matchStates[m.id]?.winner).length, [schedule, matchStates]);
+
+  const byTime = useMemo(() => {
+    const map = {};
+    filtered.forEach(m => { if (!map[m.startMin]) map[m.startMin]=[]; map[m.startMin].push(m); });
+    return Object.entries(map).sort((a,b)=>+a[0]-+b[0]);
+  }, [filtered]);
+
+  const byCourt = useMemo(() => {
+    const map = {};
+    for (let c=1; c<=7; c++) map[c]=[];
+    filtered.forEach(m => map[m.court]?.push(m));
+    Object.values(map).forEach(arr => arr.sort((a,b)=>a.startMin-b.startMin));
+    return map;
+  }, [filtered]);
+
+  const byGroup = useMemo(() => {
+    const map = {};
+    filtered.forEach(m => { const k=`${m.level}-${m.bracket}`; if (!map[k]) map[k]=[]; map[k].push(m); });
+    return map;
+  }, [filtered]);
+
+  if (!schedule.length) return (
+    <div>
+      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:24,marginBottom:24}}>
+        <div style={{fontFamily:"'Fredoka One',sans-serif",fontSize:20,color:C.white,marginBottom:16}}>🏟️ Venue Layout</div>
+        {[
+          {c:"Courts 1 & 2", l:"Level E — Beginner",      col:"#e91e8c", n:"5:00 PM"},
+          {c:"Courts 3 & 4", l:"Level D — Intermediate",  col:"#cd7f32", n:"5:00 PM"},
+          {c:"Courts 5,6 & 7",l:"Level C — Advanced",     col:"#ccc",    n:"5:00 PM"},
+          {c:"All Courts",   l:"Level B — Elite",          col:"#FFA500", n:"After E/D free up"},
+        ].map(r => (
+          <div key={r.c} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${C.faint}`}}>
+            <div style={{width:10,height:10,borderRadius:"50%",background:r.col,flexShrink:0}}/>
+            <span style={{color:C.white,fontWeight:700,fontSize:14,minWidth:140}}>{r.c}</span>
+            <span style={{color:C.muted,fontSize:13}}>→ {r.l}</span>
+            <span style={{color:C.muted,fontSize:12,marginLeft:"auto"}}>{r.n}</span>
+          </div>
+        ))}
+        <div style={{marginTop:14,fontSize:13,color:C.muted}}>⏱ 20 min per match · 🕔 5:00 PM – 10:00 PM</div>
+      </div>
+      <button onClick={generate} style={primaryBtn}>⚡ Generate Full Schedule</button>
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Stats bar */}
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:20}}>
+        {[
+          {n:schedule.length, label:"Total",     color:C.pink},
+          {n:doneCount,        label:"Done",      color:"#2ecc71"},
+          {n:lateCount,        label:"After 10PM",color:lateCount>0?"#e74c3c":C.muted},
+        ].map(({n,label,color}) => (
+          <div key={label} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 16px",textAlign:"center"}}>
+            <div style={{fontFamily:"'Fredoka One',sans-serif",fontSize:22,color,lineHeight:1}}>{n}</div>
+            <div style={{fontSize:10,color:C.muted,letterSpacing:1,marginTop:2}}>{label.toUpperCase()}</div>
+          </div>
+        ))}
+        <button onClick={generate} style={{...primaryBtn,padding:"8px 16px",fontSize:12,marginLeft:"auto",opacity:0.4,cursor:"not-allowed"}} disabled>🔒 Schedule Locked</button>
+      </div>
+
+      {lateCount>0 && <div style={{background:"rgba(231,76,60,0.1)",border:"1px solid rgba(231,76,60,0.3)",borderRadius:10,padding:"10px 14px",marginBottom:16,fontSize:13,color:"#e74c3c"}}>⚠️ {lateCount} match{lateCount!==1?"es":""} run past 10:00 PM.</div>}
+
+      {/* Controls */}
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16,alignItems:"center"}}>
+        <div style={{display:"flex",background:C.card,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
+          {[["time","⏰ Timeline"],["court","🏟 By Court"],["group","🎯 By Group"]].map(([mode,lbl]) => (
+            <button key={mode} onClick={()=>setViewMode(mode)} style={{background:viewMode===mode?`${C.pink}33`:"transparent",border:"none",borderRight:`1px solid ${C.border}`,color:viewMode===mode?C.pink:C.muted,padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:viewMode===mode?700:400,whiteSpace:"nowrap"}}>{lbl}</button>
+          ))}
+        </div>
+        <select value={filterLv} onChange={e=>setFilterLv(e.target.value)} style={{...SEL,width:"auto",padding:"7px 12px",fontSize:12}}>
+          <option value="ALL">All Levels</option>
+          {LEVEL_OPTIONS.map(l => <option key={l} value={l}>Level {l}</option>)}
+        </select>
+        <select value={filterCt} onChange={e=>setFilterCt(e.target.value)} style={{...SEL,width:"auto",padding:"7px 12px",fontSize:12}}>
+          <option value="ALL">All Courts</option>
+          {[1,2,3,4,5,6,7].map(c => <option key={c} value={c}>Court {c}</option>)}
+        </select>
+      </div>
+
+      {/* Timeline */}
+      {viewMode==="time" && byTime.map(([ms,matches]) => {
+        const mins=+ms, isLate=mins>=END_MINUTES;
+        return (
+          <div key={ms} style={{marginBottom:20}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+              <div style={{background:isLate?"rgba(231,76,60,0.2)":C.faint,border:`1px solid ${isLate?"rgba(231,76,60,0.4)":C.border}`,borderRadius:8,padding:"5px 14px",fontFamily:"'Fredoka One',sans-serif",fontSize:16,color:isLate?"#e74c3c":C.pink,flexShrink:0}}>
+                {minutesToTime(mins)}{isLate?" ⚠️":""}
+              </div>
+              <div style={{flex:1,height:1,background:C.border}}/>
+              <span style={{color:C.muted,fontSize:11}}>{matches.length} match{matches.length!==1?"es":""}</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:10}}>
+              {matches.map(m => <MatchCard key={m.id} match={m} matchState={matchStates[m.id]} onUpdate={u=>updateMatchState(m.id,u)}/>)}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* By Court */}
+      {viewMode==="court" && (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:16}}>
+          {Object.entries(byCourt).filter(([,ms])=>ms.length>0).map(([cs,matches]) => {
+            const court=+cs, cc=COURT_COLORS[(court-1)%COURT_COLORS.length];
+            return (
+              <div key={court} style={{background:C.card,border:`2px solid ${cc}44`,borderRadius:16,overflow:"hidden"}}>
+                <div style={{background:`${cc}22`,padding:"12px 16px",display:"flex",alignItems:"center",gap:10,borderBottom:`1px solid ${cc}33`}}>
+                  <div style={{background:cc,borderRadius:8,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Fredoka One',sans-serif",fontSize:18,color:"#fff",flexShrink:0}}>{court}</div>
+                  <div>
+                    <div style={{fontFamily:"'Fredoka One',sans-serif",fontSize:16,color:C.white}}>COURT {court}</div>
+                    <div style={{fontSize:11,color:C.muted}}>{matches.length} matches · ends {minutesToTime(matches[matches.length-1].endMin)}</div>
+                  </div>
+                  <div style={{marginLeft:"auto",fontSize:10,color:cc,fontWeight:700}}>{court<=2?"E":court<=4?"D":"C"} primary</div>
+                </div>
+                <div style={{padding:12,display:"flex",flexDirection:"column",gap:8}}>
+                  {matches.map(m => <MatchCard key={m.id} match={m} matchState={matchStates[m.id]} onUpdate={u=>updateMatchState(m.id,u)}/>)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* By Group */}
+      {viewMode==="group" && Object.entries(byGroup).sort(([a],[b])=>a.localeCompare(b)).map(([key,matches]) => {
+        const [lvl,brk] = key.split("-");
+        const lm = LEVEL_META[lvl]||LEVEL_META.E;
+        const bc = BKT_COLORS[(+brk-1)%BKT_COLORS.length];
+        const done = matches.filter(m=>matchStates[m.id]?.winner).length;
+        return (
+          <div key={key} style={{marginBottom:24}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
+              <span style={{background:lm.gradient,color:lm.text,borderRadius:7,padding:"4px 14px",fontWeight:900,fontSize:14,fontFamily:"'Fredoka One',sans-serif"}}>Level {lvl}</span>
+              <span style={{background:`${bc}33`,color:bc,border:`1px solid ${bc}66`,borderRadius:7,padding:"4px 14px",fontWeight:800,fontSize:14}}>Bracket {brk}</span>
+              <span style={{color:done===matches.length&&matches.length>0?"#2ecc71":C.muted,fontSize:12,fontWeight:700}}>{done}/{matches.length} done</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:10}}>
+              {matches.map(m => <MatchCard key={m.id} match={m} matchState={matchStates[m.id]} onUpdate={u=>updateMatchState(m.id,u)}/>)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════
+   RESULTS VIEW  (reads shared matchStates – no duplication)
+══════════════════════════════════════════════════════ */
+function ResultsView({ teams, schedule, matchStates, levels, brackets }) {
+  const [activeKey, setActiveKey] = useState(null);
+
+  const grouped = useMemo(() => {
+    const g = {};
+    levels.forEach(l => brackets.forEach(b => {
+      const grp = teams.filter(t => t.level===l && t.bracket===b);
+      if (grp.length >= 2) g[`${l}-${b}`] = grp;
+    }));
+    return g;
+  }, [teams, levels, brackets]);
+
+  const allKeys = useMemo(() => Object.keys(grouped).sort(), [grouped]);
+  const getMatches = useCallback(key => schedule.filter(m=>`${m.level}-${m.bracket}`===key), [schedule]);
+
+  if (!schedule.length) return <EmptyState msg="Generate the schedule first, then record results in the Schedule tab."/>;
+
+  return (
+    <div>
+      {/* Group selector pills */}
+      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:20}}>
+        {allKeys.map(key => {
+          const [lvl,brk] = key.split("-");
+          const lm = LEVEL_META[lvl]||LEVEL_META.E;
+          const bc = BKT_COLORS[(+brk-1)%BKT_COLORS.length];
+          const ms = getMatches(key);
+          const done = ms.filter(m=>matchStates[m.id]?.winner).length;
+          return (
+            <button key={key} onClick={()=>setActiveKey(activeKey===key?null:key)}
+              style={{background:activeKey===key?`${bc}33`:C.card,border:`2px solid ${activeKey===key?bc:C.border}`,borderRadius:10,padding:"7px 14px",cursor:"pointer",transition:"all 0.2s",boxShadow:activeKey===key?`0 2px 12px ${bc}44`:"none"}}>
+              <div style={{display:"flex",alignItems:"center",gap:5}}>
+                <LevelBadge level={lvl} size={10}/>
+                <span style={{color:activeKey===key?bc:C.muted,fontWeight:700,fontSize:12}}>B{brk}</span>
+              </div>
+              {ms.length>0 && <div style={{fontSize:10,color:done===ms.length?"#2ecc71":C.pink,marginTop:2,textAlign:"center"}}>{done}/{ms.length}</div>}
+            </button>
+          );
+        })}
+      </div>
+
+      {!activeKey && <EmptyState msg="Select a group above to see standings and results."/>}
+
+      {activeKey && grouped[activeKey] && (() => {
+        const [lvl,brk] = activeKey.split("-");
+        const lm = LEVEL_META[lvl]||LEVEL_META.E;
+        const bc = BKT_COLORS[(+brk-1)%BKT_COLORS.length];
+        const matches  = getMatches(activeKey);
+        const standings = computeStandings(grouped[activeKey], matches, matchStates);
+        const played   = matches.filter(m=>matchStates[m.id]?.winner).length;
+
+        return (
+          <div>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20,flexWrap:"wrap"}}>
+              <span style={{background:lm.gradient,color:lm.text,borderRadius:7,padding:"4px 14px",fontWeight:900,fontSize:16,fontFamily:"'Fredoka One',sans-serif"}}>Level {lvl}</span>
+              <span style={{background:`${bc}33`,color:bc,border:`1px solid ${bc}66`,borderRadius:7,padding:"4px 14px",fontWeight:800,fontSize:16}}>Bracket {brk}</span>
+              <span style={{color:C.muted,fontSize:13}}>{played} of {matches.length} played</span>
+            </div>
+
+            {/* Standings table */}
+            <div style={{marginBottom:24,borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
+              <div style={{background:C.faint,padding:"10px 16px",fontFamily:"'Fredoka One',sans-serif",fontSize:14,color:C.pink,letterSpacing:1}}>📊 STANDINGS</div>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                <thead>
+                  <tr style={{background:"rgba(233,30,140,0.05)"}}>
+                    {["#","Team","P","W","L","PF","PA","+/-"].map(h => (
+                      <th key={h} style={{padding:"8px 12px",textAlign:h==="Team"?"left":"center",color:C.muted,fontSize:11,fontWeight:700,letterSpacing:1,textTransform:"uppercase",borderBottom:`1px solid ${C.border}`}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {standings.map((s,i) => {
+                    const diff = s.pf - s.pa;
+                    return (
+                      <tr key={s.team.id} style={{background:i%2===0?"rgba(233,30,140,0.03)":"transparent",borderBottom:`1px solid ${C.faint}`}}>
+                        <td style={{padding:"10px 12px",textAlign:"center",color:i===0?C.pink:i===1?"#f472b6":C.muted,fontWeight:i<2?800:400,fontSize:i===0?16:13}}>{i===0?"🏆":i===1?"🥈":i+1}</td>
+                        <td style={{padding:"10px 12px",color:i===0?C.white:"#ccc",fontWeight:i===0?700:400}}>{i===0?"🐾 ":""}{s.team.player1} & {s.team.player2}</td>
+                        <td style={{padding:"10px 12px",textAlign:"center",color:C.muted}}>{s.played}</td>
+                        <td style={{padding:"10px 12px",textAlign:"center",color:s.wins>0?"#2ecc71":C.muted,fontWeight:s.wins>0?700:400}}>{s.wins}</td>
+                        <td style={{padding:"10px 12px",textAlign:"center",color:s.losses>0?"#e74c3c":C.muted}}>{s.losses}</td>
+                        <td style={{padding:"10px 12px",textAlign:"center",color:C.muted}}>{s.pf}</td>
+                        <td style={{padding:"10px 12px",textAlign:"center",color:C.muted}}>{s.pa}</td>
+                        <td style={{padding:"10px 12px",textAlign:"center",color:diff>0?C.pink:diff<0?"#e74c3c":C.muted,fontWeight:diff!==0?700:400}}>{diff>0?"+":""}{diff}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Match result list */}
+            <div style={{borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
+              <div style={{background:C.faint,padding:"10px 16px",fontFamily:"'Fredoka One',sans-serif",fontSize:14,color:C.pink,letterSpacing:1}}>🏸 MATCH RESULTS</div>
+              {matches.length===0 && <div style={{padding:"20px 16px",color:C.muted,fontSize:13}}>No matches scheduled for this group.</div>}
+              {matches.map((m,idx) => {
+                const s = matchStates[m.id] || {};
+                const has = !!s.winner;
+                const cc = COURT_COLORS[(m.court-1)%COURT_COLORS.length];
+                return (
+                  <div key={m.id} style={{padding:"12px 16px",borderBottom:idx<matches.length-1?`1px solid ${C.faint}`:"none",background:has?"rgba(233,30,140,0.04)":"transparent",display:"flex",flexWrap:"wrap",alignItems:"center",gap:10}}>
+                    <div style={{display:"flex",gap:6,flexShrink:0}}>
+                      <span style={{background:`${cc}22`,color:cc,border:`1px solid ${cc}44`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>C{m.court}</span>
+                      <span style={{color:C.muted,fontSize:11,alignSelf:"center"}}>{minutesToTime(m.startMin)}</span>
+                    </div>
+                    <div style={{flex:1,minWidth:160,display:"flex",flexWrap:"wrap",alignItems:"center",gap:6}}>
+                      <span style={{color:s.winner==="home"?C.pink:C.white,fontWeight:s.winner==="home"?700:400,fontSize:13}}>{s.winner==="home"&&"🏆 "}{m.home.player1} & {m.home.player2}</span>
+                      {has && <span style={{background:`${C.pink}22`,border:`1px solid ${C.pink}44`,borderRadius:7,padding:"2px 12px",color:C.white,fontWeight:900,fontSize:16,fontFamily:"'Fredoka One',sans-serif"}}>{s.scoreHome||0} — {s.scoreAway||0}</span>}
+                      <span style={{color:s.winner==="away"?C.pink:C.white,fontWeight:s.winner==="away"?700:400,fontSize:13}}>{s.winner==="away"&&"🏆 "}{m.away.player1} & {m.away.player2}</span>
+                    </div>
+                    {!has && <span style={{color:C.muted,fontSize:11,marginLeft:"auto"}}>Not yet played</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════
+   KNOCKOUT VIEW
+   ─ Flexible format per level: Final only / SF+Final / QF+SF+Final
+   ─ Every slot in every round is manually assignable
+   ─ Winners also auto-advance to next round as a convenience
+   ─ Format stored per level in koFormats
+══════════════════════════════════════════════════════ */
+
+// Format definitions: how many rounds and match counts per round
+const KO_FORMATS = {
+  final: { label:"Final Only",       rounds:["F"],           sizes:{F:1} },
+  sf:    { label:"Semi + Final",      rounds:["SF","F"],      sizes:{SF:2, F:1} },
+  qf:    { label:"QF + SF + Final",   rounds:["QF","SF","F"], sizes:{QF:4, SF:2, F:1} },
+};
+const ROUND_DISPLAY = { QF:"Quarter Finals", SF:"Semi Finals", F:"🏆 Final" };
+const ROUND_SHORT   = { QF:"QF", SF:"SF", F:"FINAL" };
+
+// ── KO Match Card ─────────────────────────────────────
+function KOMatchCard({ homeTeam, awayTeam, matchData, onUpdate, roundLabel, matchNum, onAssignHome, onAssignAway }) {
+  const { scoreHome="", scoreAway="", winner=null } = matchData || {};
+  const hasTeams = homeTeam && awayTeam;
+  const numIn = { width:44, background:"rgba(233,30,140,0.12)", border:`1px solid ${C.border}`, borderRadius:6, padding:"4px 2px", color:C.white, fontSize:16, fontWeight:800, textAlign:"center", outline:"none", fontFamily:"'Fredoka One',sans-serif" };
+
+  return (
+    <div style={{background:winner?`${C.pink}0d`:C.surface, border:`2px solid ${winner?C.pink+"77":C.border}`, borderRadius:14, overflow:"hidden", transition:"border-color 0.2s"}}>
+      <div style={{background:C.faint, padding:"5px 12px", display:"flex", alignItems:"center", gap:8}}>
+        <span style={{color:C.pink, fontSize:11, fontWeight:700, fontFamily:"'Fredoka One',sans-serif", letterSpacing:1}}>{roundLabel}</span>
+        <span style={{color:C.muted, fontSize:10}}>Match {matchNum}</span>
+      </div>
+      <div style={{padding:12}}>
+        {/* Home */}
+        <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:4}}>
+          <div style={{flex:1, fontSize:12, color:winner==="home"?C.pink:homeTeam?C.white:C.muted, fontWeight:winner==="home"?700:400, lineHeight:1.3}}>
+            {winner==="home" && "🏆 "}{homeTeam ? `${homeTeam.player1} & ${homeTeam.player2}` : "TBD"}
+          </div>
+          <input type="number" min="0" max="99" value={scoreHome} disabled={!hasTeams}
+            onChange={e=>onUpdate({scoreHome:e.target.value})}
+            style={{...numIn, opacity:hasTeams?1:0.3}}/>
+        </div>
+        <div style={{textAlign:"center", color:C.muted, fontSize:10, margin:"4px 0"}}>vs</div>
+        {/* Away */}
+        <div style={{display:"flex", alignItems:"center", gap:8, marginTop:4}}>
+          <div style={{flex:1, fontSize:12, color:winner==="away"?C.pink:awayTeam?C.white:C.muted, fontWeight:winner==="away"?700:400, lineHeight:1.3}}>
+            {winner==="away" && "🏆 "}{awayTeam ? `${awayTeam.player1} & ${awayTeam.player2}` : "TBD"}
+          </div>
+          <input type="number" min="0" max="99" value={scoreAway} disabled={!hasTeams}
+            onChange={e=>onUpdate({scoreAway:e.target.value})}
+            style={{...numIn, opacity:hasTeams?1:0.3}}/>
+        </div>
+        {/* Winner buttons */}
+        {hasTeams && (
+          <div style={{display:"flex", gap:6, marginTop:10}}>
+            {[["home",homeTeam],["away",awayTeam]].map(([side,team]) => (
+              <button key={side} onClick={()=>onUpdate({winner:winner===side?null:side})}
+                style={{flex:1, background:winner===side?`${C.pink}33`:"transparent", border:`1px solid ${winner===side?C.pink:C.border}`, borderRadius:7, padding:"4px 8px", color:winner===side?C.pink:C.muted, fontSize:11, cursor:"pointer", fontWeight:winner===side?700:400, transition:"all 0.15s"}}>
+                {team.player1.split(" ")[0]} wins 🐾
+              </button>
+            ))}
+          </div>
+        )}
+        {/* Assign buttons — always shown on every card */}
+        <div style={{display:"flex", gap:4, marginTop:8}}>
+          <button onClick={onAssignHome}
+            style={{flex:1, background:"rgba(233,30,140,0.06)", border:`1px solid ${C.border}`, borderRadius:6, padding:"3px 6px", color:C.muted, fontSize:10, cursor:"pointer"}}>
+            {homeTeam ? "✎ Change A" : "+ Set Team A"}
+          </button>
+          <button onClick={onAssignAway}
+            style={{flex:1, background:"rgba(233,30,140,0.06)", border:`1px solid ${C.border}`, borderRadius:6, padding:"3px 6px", color:C.muted, fontSize:10, cursor:"pointer"}}>
+            {awayTeam ? "✎ Change B" : "+ Set Team B"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main KnockoutView ─────────────────────────────────
+function KnockoutView({ teams, schedule, matchStates }) {
+  const [selectedLevel, setSelectedLevel] = useState("B");
+  // koFormats: { [level]: "final"|"sf"|"qf" }
+  const [koFormats, setKoFormats] = useState({ B:"qf", C:"qf", D:"sf", E:"final" });
+  // koData: { [level]: { [matchKey]: { homeTeam, awayTeam, scoreHome, scoreAway, winner } } }
+  const [koData, setKoData] = useState({});
+  const [showSeedModal, setShowSeedModal] = useState(false);
+  const [assignTarget, setAssignTarget] = useState(null); // { key, slot }
+
+  const format = koFormats[selectedLevel] || "final";
+  const fmt    = KO_FORMATS[format];
+  const levelData = koData[selectedLevel] || {};
+
+  function mKey(round, idx) { return `${selectedLevel}_${round}_${idx}`; }
+  function getM(round, idx) { return levelData[mKey(round,idx)] || {}; }
+  function setM(round, idx, update) {
+    const key = mKey(round, idx);
+    setKoData(prev => ({
+      ...prev,
+      [selectedLevel]: { ...(prev[selectedLevel]||{}), [key]: { ...(prev[selectedLevel]?.[key]||{}), ...update } },
+    }));
+  }
+
+  // Winner of a stored match (reads homeTeam/awayTeam from stored data)
+  function winnerTeamOf(round, idx) {
+    const m = getM(round, idx);
+    if (!m.winner) return null;
+    return m.winner === "home" ? m.homeTeam : m.awayTeam;
+  }
+
+  // Auto-advance: get the team that should feed into a slot from the previous round
+  // Returns the stored team if manually set, otherwise the winner from the feeder match
+  function resolveTeam(round, idx, slot) {
+    const stored = getM(round, idx)[slot==="home"?"homeTeam":"awayTeam"] || null;
+    if (stored) return stored; // manual override always wins
+
+    // Auto-feed from previous round
+    if (round === "SF" && format === "qf") {
+      const qfIdx = idx * 2 + (slot==="home" ? 0 : 1);
+      return winnerTeamOf("QF", qfIdx);
+    }
+    if (round === "F") {
+      if (format === "sf" || format === "qf") {
+        const sfIdx = slot==="home" ? 0 : 1;
+        return winnerTeamOf("SF", sfIdx);
+      }
+    }
+    return null;
+  }
+
+  // Champion
+  const finalM = getM("F", 0);
+  const finalHome = resolveTeam("F", 0, "home");
+  const finalAway = resolveTeam("F", 0, "away");
+  const champion = finalM.winner === "home" ? finalHome : finalM.winner === "away" ? finalAway : null;
+
+  // RR standings for auto-seed
+  function getRRStandings(level) {
+    const bkts = [...new Set(teams.filter(t=>t.level===level).map(t=>t.bracket))].sort();
+    return bkts.flatMap(b => {
+      const grp = teams.filter(t=>t.level===level&&t.bracket===b);
+      const ms  = schedule.filter(m=>m.level===level&&m.bracket===b);
+      return computeStandings(grp, ms, matchStates);
+    });
+  }
+
+  const rrStandings = useMemo(() => getRRStandings(selectedLevel), [selectedLevel, teams, schedule, matchStates]);
+
+  function seedFromRR() {
+    const st = rrStandings;
+    const newData = {};
+    if (format === "qf") {
+      [[0,7],[3,4],[1,6],[2,5]].forEach(([a,b],i) => {
+        newData[mKey("QF",i)] = { homeTeam:st[a]?.team||null, awayTeam:st[b]?.team||null, scoreHome:"", scoreAway:"", winner:null };
+      });
+      [0,1].forEach(i => { newData[mKey("SF",i)] = { scoreHome:"", scoreAway:"", winner:null }; });
+    } else if (format === "sf") {
+      [[0,3],[1,2]].forEach(([a,b],i) => {
+        newData[mKey("SF",i)] = { homeTeam:st[a]?.team||null, awayTeam:st[b]?.team||null, scoreHome:"", scoreAway:"", winner:null };
+      });
+    } else {
+      newData[mKey("F",0)] = { homeTeam:st[0]?.team||null, awayTeam:st[1]?.team||null, scoreHome:"", scoreAway:"", winner:null };
+    }
+    newData[mKey("F",0)] = { ...(newData[mKey("F",0)]||{}), scoreHome:"", scoreAway:"", winner:null };
+    setKoData(prev => ({ ...prev, [selectedLevel]: { ...(prev[selectedLevel]||{}), ...newData } }));
+    setShowSeedModal(false);
+  }
+
+  function doAssign(team) {
+    if (!assignTarget) return;
+    const { key, slot } = assignTarget;
+    setKoData(prev => ({
+      ...prev,
+      [selectedLevel]: {
+        ...(prev[selectedLevel]||{}),
+        [key]: { ...(prev[selectedLevel]?.[key]||{}), [slot==="home"?"homeTeam":"awayTeam"]:team, winner:null, scoreHome:"", scoreAway:"" },
+      },
+    }));
+    setAssignTarget(null);
+  }
+
+  const levelTeams = teams.filter(t=>t.level===selectedLevel);
+
+  // Column renderer
+  function renderRound(round) {
+    const count = fmt.sizes[round];
+    const label = ROUND_DISPLAY[round];
+    const short = ROUND_SHORT[round];
+    const isFirst = fmt.rounds[0] === round;
+
+    return (
+      <div key={round}>
+        <div style={{textAlign:"center", color:round==="F"?"#FFD700":C.pink, fontSize:11, fontWeight:700, letterSpacing:3, fontFamily:"'Fredoka One',sans-serif", textTransform:"uppercase", marginBottom:12, paddingBottom:8, borderBottom:`1px solid ${C.border}`}}>
+          {label}
+        </div>
+        <div style={{display:"flex", flexDirection:"column", gap:10}}>
+          {Array.from({length:count}, (_,idx) => {
+            const key = mKey(round, idx);
+            const m   = getM(round, idx);
+            const home = resolveTeam(round, idx, "home");
+            const away = resolveTeam(round, idx, "away");
+            return (
+              <KOMatchCard key={idx}
+                homeTeam={home}
+                awayTeam={away}
+                matchData={{...m, homeTeam:home, awayTeam:away}}
+                roundLabel={short}
+                matchNum={idx+1}
+                onAssignHome={()=>setAssignTarget({key, slot:"home"})}
+                onAssignAway={()=>setAssignTarget({key, slot:"away"})}
+                onUpdate={u => setM(round, idx, u)}
+              />
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Level selector */}
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:20}}>
+        {LEVEL_OPTIONS.map(lv => {
+          const m=LEVEL_META[lv], cnt=teams.filter(t=>t.level===lv).length, active=selectedLevel===lv;
+          return (
+            <button key={lv} onClick={()=>setSelectedLevel(lv)}
+              style={{background:active?m.gradient:"rgba(255,255,255,0.04)",color:active?m.text:C.muted,border:`2px solid ${active?"transparent":C.border}`,borderRadius:12,padding:"10px 20px",cursor:"pointer",transition:"all 0.2s",boxShadow:active?"0 4px 20px rgba(233,30,140,0.3)":"none"}}>
+              <div style={{fontWeight:900,fontSize:18,fontFamily:"'Fredoka One',sans-serif",letterSpacing:2}}>{lv}</div>
+              <div style={{fontSize:10,fontFamily:"'DM Sans',sans-serif"}}>{m.label} · {cnt} pairs</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Format selector */}
+      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"14px 18px",marginBottom:20}}>
+        <div style={{color:C.muted,fontSize:11,fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:10,fontFamily:"'Fredoka One',sans-serif"}}>
+          📋 Format for Level {selectedLevel}
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {Object.entries(KO_FORMATS).map(([key,{label}]) => {
+            const active = format===key;
+            return (
+              <button key={key} onClick={()=>setKoFormats(prev=>({...prev,[selectedLevel]:key}))}
+                style={{background:active?`${C.pink}33`:"transparent", border:`2px solid ${active?C.pink:C.border}`, borderRadius:10, padding:"8px 18px", color:active?C.pink:C.muted, fontSize:13, fontWeight:active?700:400, cursor:"pointer", transition:"all 0.2s"}}>
+                {key==="final"?"🏆 ":key==="sf"?"⚡ ":"🎯 "}{label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Champion banner */}
+      {champion && (
+        <div style={{background:"linear-gradient(135deg,#FFD70018,#FFA50018)",border:"2px solid #FFD700",borderRadius:16,padding:"16px 24px",marginBottom:20,display:"flex",alignItems:"center",gap:16}}>
+          <div style={{fontSize:40}}>🏆</div>
+          <div>
+            <div style={{color:"#FFD700",fontSize:11,fontWeight:700,letterSpacing:3,fontFamily:"'Fredoka One',sans-serif"}}>LEVEL {selectedLevel} CHAMPION</div>
+            <div style={{color:C.white,fontSize:20,fontWeight:800,marginTop:4}}>{champion.player1} & {champion.player2}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap",alignItems:"center"}}>
+        <button onClick={()=>setShowSeedModal(true)} style={primaryBtn}>🌱 Auto-Seed from RR Standings</button>
+        <span style={{color:C.muted,fontSize:12}}>Teams can also be assigned manually on each match card below</span>
+      </div>
+
+      {/* Bracket columns */}
+      <div style={{overflowX:"auto"}}>
+        <div style={{display:"grid", gridTemplateColumns:`repeat(${fmt.rounds.length}, 1fr)`, gap:20, minWidth: fmt.rounds.length * 260}}>
+          {fmt.rounds.map(round => renderRound(round))}
+        </div>
+      </div>
+
+      {/* Auto-Seed Modal */}
+      {showSeedModal && (
+        <Modal title={`🌱 Auto-Seed Level ${selectedLevel} — ${fmt.label}`} onClose={()=>setShowSeedModal(false)}>
+          <p style={{color:C.muted,fontSize:13,margin:"0 0 16px"}}>
+            Seeds top teams from Level {selectedLevel} RR standings into the <strong style={{color:C.white}}>first round</strong> ({fmt.rounds[0] === "QF" ? "1v8, 4v5, 2v7, 3v6" : fmt.rounds[0] === "SF" ? "1v4, 2v3" : "1v2"}).
+          </p>
+          <div style={{marginBottom:20,maxHeight:300,overflowY:"auto"}}>
+            {rrStandings.length===0
+              ? <div style={{color:"#e74c3c",fontSize:13}}>⚠️ No RR results for Level {selectedLevel} yet.</div>
+              : rrStandings.slice(0, format==="qf"?8:format==="sf"?4:2).map((s,i) => (
+                <div key={s.team.id} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:`1px solid ${C.faint}`}}>
+                  <span style={{color:C.pink,fontWeight:700,fontSize:13,minWidth:22}}>#{i+1}</span>
+                  <span style={{color:C.white,fontSize:13,flex:1}}>{s.team.player1} & {s.team.player2}</span>
+                  <span style={{color:C.muted,fontSize:11}}>{s.wins}W–{s.losses}L</span>
+                </div>
+              ))
+            }
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={seedFromRR} style={primaryBtn}>🌱 Seed Now</button>
+            <button onClick={()=>setShowSeedModal(false)} style={secondaryBtn}>Cancel</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Manual Assign Modal */}
+      {assignTarget && (
+        <Modal title={`Assign ${assignTarget.slot==="home"?"Team A":"Team B"}`} onClose={()=>setAssignTarget(null)}>
+          <p style={{color:C.muted,fontSize:12,margin:"0 0 12px"}}>Select a team from Level {selectedLevel}:</p>
+          <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:420,overflowY:"auto"}}>
+            {levelTeams.length===0 && <div style={{color:C.muted,fontSize:13}}>No teams for Level {selectedLevel}.</div>}
+            {levelTeams.map(t => (
+              <button key={t.id} onClick={()=>doAssign(t)}
+                style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",cursor:"pointer",textAlign:"left",color:C.white,fontSize:13,fontFamily:"'DM Sans',sans-serif",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span>🐾 {t.player1} & {t.player2}</span>
+                <span style={{color:C.muted,fontSize:11}}>Bracket {t.bracket}</span>
+              </button>
+            ))}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════
+   SETTINGS VIEW
+══════════════════════════════════════════════════════ */
+function SettingsView({ levels, setLevels, brackets, setBrackets }) {
+  const toggle = (arr, set, val, isNum) =>
+    set(prev => prev.includes(val) ? prev.filter(x=>x!==val) : [...prev,val].sort(isNum?(a,b)=>a-b:undefined));
+  return (
+    <div style={{maxWidth:500}}>
+      <div style={{marginBottom:32}}>
+        <div style={{color:C.pink,fontSize:12,fontWeight:700,letterSpacing:3,marginBottom:16,textTransform:"uppercase",fontFamily:"'Fredoka One',sans-serif"}}>🐾 Active Levels</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:12}}>
+          {LEVEL_OPTIONS.map(l => {
+            const lm=LEVEL_META[l], active=levels.includes(l);
+            return (
+              <button key={l} onClick={()=>toggle(levels,setLevels,l,false)}
+                style={{background:active?lm.gradient:"rgba(255,255,255,0.04)",color:active?lm.text:C.muted,border:`2px solid ${active?"transparent":C.border}`,borderRadius:12,padding:"12px 22px",cursor:"pointer",transition:"all 0.2s",boxShadow:active?"0 4px 16px rgba(233,30,140,0.3)":"none"}}>
+                <div style={{fontWeight:900,fontSize:22,fontFamily:"'Fredoka One',sans-serif",letterSpacing:2}}>{l}</div>
+                <div style={{fontSize:10,fontWeight:600,fontFamily:"'DM Sans',sans-serif"}}>{lm.label}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div>
+        <div style={{color:C.pink,fontSize:12,fontWeight:700,letterSpacing:3,marginBottom:16,textTransform:"uppercase",fontFamily:"'Fredoka One',sans-serif"}}>🎯 Active Brackets</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:10}}>
+          {BRACKET_OPTIONS.map(b => {
+            const bc=BKT_COLORS[(b-1)%BKT_COLORS.length], active=brackets.includes(b);
+            return (
+              <button key={b} onClick={()=>toggle(brackets,setBrackets,b,true)}
+                style={{background:active?`${bc}25`:"rgba(255,255,255,0.04)",color:active?bc:C.muted,border:`2px solid ${active?bc:C.border}`,borderRadius:12,padding:"10px 18px",cursor:"pointer",transition:"all 0.2s",boxShadow:active?`0 4px 14px ${bc}44`:"none"}}>
+                <div style={{fontWeight:900,fontSize:20,fontFamily:"'Fredoka One',sans-serif"}}>{b}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════
+   APP ROOT
+══════════════════════════════════════════════════════ */
+const TABS = [
+  { id:"teams",    label:"Teams",    icon:"🏸" },
+  { id:"brackets", label:"Brackets", icon:"🗂"  },
+  { id:"schedule", label:"Schedule", icon:"📅" },
+  { id:"results",  label:"Results",  icon:"📊" },
+  { id:"knockout", label:"Knockout", icon:"⚔️"  },
+  { id:"settings", label:"Settings", icon:"⚙️"  },
+];
+
+function App() {
+  const [tab,          setTab]          = useState("schedule");
+  const [teams,        setTeams]        = useState(INITIAL_TEAMS);
+  const [levels,       setLevels]       = useState(["B","C","D","E"]);
+  const [brackets,     setBrackets]     = useState([1,2,3,4,5,6,7,8]);
+  const [modal,        setModal]        = useState(null);
+  const [editTeam,     setEditTeam]     = useState(null);
+
+  // ── Single source of truth for RR schedule ──
+  const [schedule,     setSchedule]     = useState([]);
+  const [matchStates,  setMatchStates]  = useState({}); // id → { scoreHome, scoreAway, winner }
+
+  const updateMatchState = useCallback((id, update) =>
+    setMatchStates(prev => ({ ...prev, [id]: { ...prev[id], ...update } })), []);
+
+  const addTeam    = form => { setTeams(prev => [...prev, { ...form, id:uid() }]); setModal(null); };
+  const updateTeam = form => { setTeams(prev => prev.map(t => t.id===editTeam.id ? { ...form, id:t.id } : t)); setEditTeam(null); };
+
+  const doneCount = useMemo(() => schedule.filter(m=>matchStates[m.id]?.winner).length, [schedule, matchStates]);
+
+  return (
+    <>
+      <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=DM+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
+      <style>{`
+        *, *::before, *::after { box-sizing: border-box; }
+        select, select option   { background: #2a1520 !important; color: #fff !important; }
+        select                  { color-scheme: dark; }
+        input[type=number]::-webkit-inner-spin-button { opacity: 0.4; }
+      `}</style>
+
+      <div style={{minHeight:"100vh",background:C.bg,color:C.white,fontFamily:"'DM Sans',sans-serif",position:"relative",paddingBottom:60}}>
+        <PawBg/>
+        <div style={{position:"relative",zIndex:1}}>
+
+          {/* ── Sticky header ── */}
+          <div style={{background:`linear-gradient(180deg,${C.surface} 0%,${C.bg} 100%)`,borderBottom:`1px solid ${C.border}`,position:"sticky",top:0,zIndex:100}}>
+            <div style={{maxWidth:1000,margin:"0 auto",padding:"16px 20px 0"}}>
+              <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:16,flexWrap:"wrap"}}>
+                <PawSmashLogo/>
+                <div style={{marginLeft:"auto",display:"flex",gap:8}}>
+                  {[
+                    {n:teams.length,    label:"PAIRS",   color:C.pink},
+                    {n:doneCount,       label:"DONE",    color:"#2ecc71"},
+                    {n:schedule.length, label:"MATCHES", color:"#f472b6"},
+                  ].map(({n,label,color}) => (
+                    <div key={label} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"6px 14px",textAlign:"center"}}>
+                      <div style={{fontFamily:"'Fredoka One',sans-serif",fontSize:22,color,lineHeight:1}}>{n}</div>
+                      <div style={{fontSize:9,color:C.muted,letterSpacing:1.5}}>{label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{height:1,background:`linear-gradient(90deg,transparent,${C.pink}66,transparent)`}}/>
+              <div style={{display:"flex",overflowX:"auto"}}>
+                {TABS.map(t => (
+                  <button key={t.id} onClick={()=>setTab(t.id)}
+                    style={{background:"none",border:"none",borderBottom:`3px solid ${tab===t.id?C.pink:"transparent"}`,color:tab===t.id?C.white:C.muted,fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,fontSize:13,padding:"10px 16px",cursor:"pointer",whiteSpace:"nowrap",transition:"all 0.2s"}}>
+                    {t.icon} {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Tab content ── */}
+          <div style={{maxWidth:1000,margin:"0 auto",padding:"28px 16px"}}>
+            {tab==="teams"    && <TeamsView    teams={teams} setTeams={setTeams} levels={levels} brackets={brackets} setModal={setModal} setEditTeam={setEditTeam}/>}
+            {tab==="brackets" && <BracketView  teams={teams} levels={levels} brackets={brackets}/>}
+            {tab==="schedule" && <ScheduleView teams={teams} schedule={schedule} setSchedule={setSchedule} matchStates={matchStates} updateMatchState={updateMatchState}/>}
+            {tab==="results"  && <ResultsView  teams={teams} schedule={schedule} matchStates={matchStates} levels={levels} brackets={brackets}/>}
+            {tab==="knockout" && <KnockoutView teams={teams} schedule={schedule} matchStates={matchStates}/>}
+            {tab==="settings" && <SettingsView levels={levels} setLevels={setLevels} brackets={brackets} setBrackets={setBrackets}/>}
+          </div>
+
+        </div>
+      </div>
+
+      {/* ── Modals ── */}
+      {modal==="add" && (
+        <Modal title="🐾 Add Doubles Team" onClose={()=>setModal(null)}>
+          <TeamForm onSave={addTeam} onCancel={()=>setModal(null)} levels={levels} brackets={brackets}/>
+        </Modal>
+      )}
+      {editTeam && (
+        <Modal title="✎ Edit Team" onClose={()=>setEditTeam(null)}>
+          <TeamForm initial={editTeam} onSave={updateTeam} onCancel={()=>setEditTeam(null)} levels={levels} brackets={brackets}/>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(App));
+  </script>
+</body>
+</html>
