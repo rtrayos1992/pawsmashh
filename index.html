@@ -1416,3 +1416,197 @@ function App() {
   </script>
 </body>
 </html>
+
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Paw Smash — Play for Strays</title>
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#0d0a0b;}
+select,select option{background:#2a1520!important;color:#fff!important;}
+</style>
+
+</head>
+
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+
+/* ===============================
+ADMIN MODE
+=============================== */
+
+const urlParams = new URLSearchParams(window.location.search);
+const isAdmin = urlParams.get("admin") === "1";
+
+/* ===============================
+YOUR EXISTING CODE STARTS HERE
+=============================== */
+
+/* KEEP EVERYTHING YOU ALREADY HAVE
+   FROM:
+   const { useState, useMemo, useCallback } = React;
+   ALL THE WAY UNTIL THE App() FUNCTION
+*/
+
+/* =================================================
+ONLY CHANGE THE App() FUNCTION BELOW
+================================================= */
+
+function App(){
+
+const [tab,setTab]=React.useState("schedule");
+
+/* your existing states stay the same */
+const [teams,setTeams]=useLocalStorage("ps_teams",INITIAL_TEAMS);
+const [levels,setLevels]=React.useState(["B","C","D","E"]);
+const [brackets,setBrackets]=React.useState([1,2,3,4,5,6,7,8]);
+const [modal,setModal]=React.useState(null);
+const [editTeam,setEditTeam]=React.useState(null);
+
+const [schedule,setSchedule]=useLocalStorage("ps_schedule",[]);
+const [matchStates,setMatchStates]=useLocalStorage("ps_matchStates",{});
+
+const updateMatchState=(id,update)=>{
+setMatchStates(prev=>({...prev,[id]:{...prev[id],...update}}));
+};
+
+/* hide admin tabs if viewer */
+const visibleTabs = isAdmin
+? TABS
+: TABS.filter(t=>!["teams","settings"].includes(t.id));
+
+return(
+<>
+<div style={{minHeight:"100vh",background:"#0d0a0b",color:"#fff"}}>
+
+{/* HEADER */}
+<div style={{padding:20,borderBottom:"1px solid #3a1f25"}}>
+<h1>PawSmash Tournament</h1>
+</div>
+
+{/* TABS */}
+<div style={{display:"flex",gap:10,padding:10}}>
+{visibleTabs.map(t=>(
+<button
+key={t.id}
+onClick={()=>setTab(t.id)}
+style={{
+background:tab===t.id?"#e91e8c":"transparent",
+border:"1px solid #3a1f25",
+color:"#fff",
+padding:"8px 14px",
+cursor:"pointer"
+}}
+>
+{t.icon} {t.label}
+</button>
+))}
+</div>
+
+{/* CONTENT */}
+
+<div style={{padding:20}}>
+
+{tab==="teams" && isAdmin && (
+<TeamsView
+teams={teams}
+setTeams={setTeams}
+levels={levels}
+brackets={brackets}
+setModal={setModal}
+setEditTeam={setEditTeam}
+/>
+)}
+
+{tab==="brackets" && (
+<BracketView
+teams={teams}
+levels={levels}
+brackets={brackets}
+/>
+)}
+
+{tab==="schedule" && (
+<ScheduleView
+teams={teams}
+schedule={schedule}
+setSchedule={setSchedule}
+matchStates={matchStates}
+updateMatchState={updateMatchState}
+isAdmin={isAdmin}
+/>
+)}
+
+{tab==="results" && (
+<ResultsView
+teams={teams}
+schedule={schedule}
+matchStates={matchStates}
+levels={levels}
+brackets={brackets}
+/>
+)}
+
+{tab==="knockout" && (
+<KnockoutView
+teams={teams}
+schedule={schedule}
+matchStates={matchStates}
+/>
+)}
+
+{tab==="settings" && isAdmin && (
+<SettingsView
+levels={levels}
+setLevels={setLevels}
+brackets={brackets}
+setBrackets={setBrackets}
+/>
+)}
+
+</div>
+</div>
+</>
+);
+}
+
+/* ===============================
+LOCK MATCH EDITING FOR VIEWERS
+=============================== */
+
+function MatchCard(props){
+
+const {isAdmin}=props;
+
+/* disable editing if viewer */
+
+const scoreDisabled = !isAdmin;
+
+/* your existing MatchCard code continues */
+
+}
+
+/* ===============================
+RENDER APP
+=============================== */
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App/>);
+
+</script>
+
+</body>
+</html>
