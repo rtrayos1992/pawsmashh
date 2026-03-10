@@ -101,38 +101,73 @@ function shuffle(arr) {
 }
 
 function buildSchedule(teams) {
-  // 1. Build RR match lists per group
+  // ── Step 1: generate RR matches per bracket group ──────────────────
   const groups = {};
   LEVEL_OPTIONS.forEach(l => BRACKET_OPTIONS.forEach(b => {
     const grp = teams.filter(t => t.level===l && t.bracket===b);
-    if (grp.length >= 2) groups[`${l}-${b}`] = generateRR(grp);
+    if (grp.length >= 2) {
+      const ms = generateRR(grp).map(m => ({ ...m, level:l, bracket:b }));
+      groups[`${l}-${b}`] = shuffle(ms); // randomise within each bracket
+    }
   }));
 
-  // 2. Assign courts / times — shuffle per level so brackets are interleaved
-  const courtFree = {};
-  for (let c = 1; c <= TOTAL_COURTS; c++) courtFree[c] = START_MINUTES;
   const out = [];
 
-  function assign(list, courts) {
-    shuffle(list).forEach(m => {
-      let best = courts[0], bt = courtFree[courts[0]];
-      courts.forEach(c => { if (courtFree[c] < bt) { bt=courtFree[c]; best=c; } });
-      const s = Math.max(bt, START_MINUTES);
-      courtFree[best] = s + MATCH_DURATION;
-      out.push({ ...m, court:best, startMin:s, endMin:s+MATCH_DURATION });
-    });
+  // ── Core scheduler: enforces 1-match (20 min) rest per team ────────
+  // Picks the pending match whose earliest valid slot (both teams rested
+  // + court free) comes first. Guarantees no team plays back-to-back.
+  function assignWithRest(matchList, courts) {
+    const courtFree = {};
+    courts.forEach(c => { courtFree[c] = START_MINUTES; });
+    const teamFree  = {}; // teamId → earliest next start
+    const pending   = [...matchList];
+
+    while (pending.length) {
+      let bestIdx = 0, bestStart = Infinity, bestCourt = courts[0];
+
+      pending.forEach((m, i) => {
+        const th = teamFree[m.home.id] || START_MINUTES;
+        const ta = teamFree[m.away.id] || START_MINUTES;
+        const teamEarliest = Math.max(th, ta);
+        courts.forEach(c => {
+          const s = Math.max(courtFree[c], teamEarliest);
+          if (s < bestStart) { bestStart=s; bestIdx=i; bestCourt=c; }
+        });
+      });
+
+      const m = pending.splice(bestIdx, 1)[0];
+      const s = bestStart;
+      const e = s + MATCH_DURATION;
+      courtFree[bestCourt] = e;
+      // 1-match rest: team cannot start until current match ends + 1 full slot
+      teamFree[m.home.id] = e + MATCH_DURATION;
+      teamFree[m.away.id] = e + MATCH_DURATION;
+      out.push({ ...m, court:bestCourt, startMin:s, endMin:e });
+    }
   }
 
-  ["E","D","C"].forEach(lv => assign(
-    Object.keys(groups).filter(k=>k.startsWith(lv))
-      .flatMap(k => groups[k].map(m => ({ ...m, level:lv, bracket:Number(k.split("-")[1]) }))),
-    LEVEL_COURTS[lv]
-  ));
-  assign(
-    Object.keys(groups).filter(k=>k.startsWith("B"))
-      .flatMap(k => groups[k].map(m => ({ ...m, level:"B", bracket:Number(k.split("-")[1]) }))),
-    [1,2,3,4,5,6,7]
-  );
+  // ── Step 2: interleave brackets then assign per level ──────────────
+  // Interleaving: take one match from each bracket in rotation so teams
+  // from different brackets get spread across the time slots.
+  function interleave(keys) {
+    const queues = keys.map(k => [...(groups[k]||[])]);
+    const result = [];
+    let active = queues.filter(q => q.length > 0);
+    while (active.length) {
+      active.forEach(q => { if (q.length) result.push(q.shift()); });
+      active = active.filter(q => q.length > 0);
+    }
+    return shuffle(result); // final shuffle breaks any bracket ordering
+  }
+
+  ["E","D","C"].forEach(lv => {
+    const keys = Object.keys(groups).filter(k => k.startsWith(lv));
+    if (keys.length) assignWithRest(interleave(keys), LEVEL_COURTS[lv]);
+  });
+
+  const bKeys = Object.keys(groups).filter(k => k.startsWith("B"));
+  if (bKeys.length) assignWithRest(interleave(bKeys), [1,2,3,4,5,6,7]);
+
   return out;
 }
 
