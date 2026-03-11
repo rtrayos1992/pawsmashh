@@ -103,8 +103,11 @@ function useLocalStorage(key, initial) {
 const COLLECTION = "pawsmash";
 const DOC_ID     = "tournament";
 function getTournamentRef() {
-  try { return firebase.firestore().collection(COLLECTION).doc(DOC_ID); }
-  catch(e) { console.error("Firestore ref error:", e); return null; }
+  try {
+    if (!firebase || !firebase.firestore) { console.error("❌ Firebase not loaded"); return null; }
+    return firebase.firestore().collection(COLLECTION).doc(DOC_ID);
+  }
+  catch(e) { console.error("❌ Firestore ref error:", e); return null; }
 }
 const _listeners = {};
 let   _docData   = null;
@@ -118,17 +121,26 @@ let _unsubscribe = null;
 function _ensureListening() {
   if (_unsubscribe) return;
   const ref = getTournamentRef();
-  if (!ref) return;
+  if (!ref) { console.error("❌ No ref — cannot listen"); return; }
+  console.log("🔥 Starting onSnapshot listener...");
   _unsubscribe = ref.onSnapshot(snap => {
+    console.log("📡 Snapshot received — exists:", snap.exists, "fields:", snap.exists ? Object.keys(snap.data()) : []);
     if (snap && snap.exists) _notify(snap.data());
-  }, err => { console.error("onSnapshot error:", err); _unsubscribe = null; });
+  }, err => {
+    console.error("❌ onSnapshot error:", err.code, err.message);
+    _unsubscribe = null;
+  });
 }
 async function saveField(field, value) {
   try {
     const ref = getTournamentRef();
-    if (!ref) return;
+    if (!ref) { console.error("❌ saveField: no ref for", field); return; }
+    console.log("💾 Saving:", field);
     await ref.set({ [field]: value }, { merge: true });
-  } catch(e) { console.error("Save error:", field, e); }
+    console.log("✅ Saved:", field);
+  } catch(e) {
+    console.error("❌ Save failed for", field, "—", e.code, e.message);
+  }
 }
 function useSharedState(field, initial) {
   const lsKey = `ps_${field}`;
@@ -773,7 +785,7 @@ function MatchCard({ match, matchState, onUpdate, onReschedule }) {
 /* ══════════════════════════════════════════════════════
    SCHEDULE VIEW
 ══════════════════════════════════════════════════════ */
-function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchStates, updateMatchState, regenCount, setRegenCount, setScheduleVersion }) {
+function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchStates, updateMatchState, setScheduleVersion }) {
   const [viewMode,   setViewMode]   = useState("time");
   const [filterLv,   setFilterLv]   = useState("ALL");
   const [filterCt,   setFilterCt]   = useState("ALL");
@@ -786,12 +798,9 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
   };
 
   const regenerate = () => {
-    if (regenCount > 0) {
-      setSchedule(buildSchedule(teams));
-      setMatchStates({});             // clear scores — old match IDs are gone
-      setRegenCount(prev => prev - 1);
-      setScheduleVersion(SCHEDULE_VERSION);
-    }
+    setSchedule(buildSchedule(teams));
+    setMatchStates({});
+    setScheduleVersion(SCHEDULE_VERSION);
   };
 
   // Reschedule: update court/time for a single match in the schedule array
@@ -865,14 +874,10 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
             <div style={{fontSize:10,color:C.muted,letterSpacing:1,marginTop:2}}>{label.toUpperCase()}</div>
           </div>
         ))}
-        {regenCount > 0 ? (
-          <button onClick={regenerate}
-            style={{...primaryBtn,padding:"8px 16px",fontSize:12,marginLeft:"auto",background:"rgba(233,30,140,0.15)",border:`1px solid ${C.pink}66`,color:C.pinkLight}}>
-            🔁 Regenerate <span style={{background:`${C.pink}33`,borderRadius:5,padding:"1px 6px",marginLeft:4,fontSize:11}}>{regenCount} left</span>
-          </button>
-        ) : (
-          <div style={{...primaryBtn,padding:"8px 16px",fontSize:12,marginLeft:"auto",opacity:0.4,cursor:"not-allowed",userSelect:"none"}}>🔒 Schedule Locked</div>
-        )}
+        <button onClick={regenerate}
+          style={{...primaryBtn,padding:"8px 16px",fontSize:12,marginLeft:"auto",background:"rgba(233,30,140,0.15)",border:`1px solid ${C.pink}66`,color:C.pinkLight}}>
+          🔁 Regenerate
+        </button>
       </div>
 
       {lateCount>0 && <div style={{background:"rgba(231,76,60,0.1)",border:"1px solid rgba(231,76,60,0.3)",borderRadius:10,padding:"10px 14px",marginBottom:16,fontSize:13,color:"#e74c3c"}}>⚠️ {lateCount} match{lateCount!==1?"es":""} run past 10:00 PM.</div>}
@@ -1781,14 +1786,12 @@ function App() {
   const [scheduleVersion, setScheduleVersion] = useSharedState("scheduleVersion", "");
   const [schedule,     setSchedule]     = useSharedState("schedule", []);
   const [matchStates,  setMatchStates]  = useSharedState("matchStates", {});
-  const [regenCount,   setRegenCount]   = useSharedState("regenCount", 3);
 
   // Clear stale schedule when version changes — must be AFTER all hooks
   useEffect(() => {
     if (scheduleVersion !== "" && scheduleVersion !== SCHEDULE_VERSION) {
       setSchedule([]);
       setMatchStates({});
-      setRegenCount(3);
       setScheduleVersion(SCHEDULE_VERSION);
     }
   }, [scheduleVersion]);
@@ -1907,7 +1910,7 @@ function App() {
           <div style={{maxWidth:1000,margin:"0 auto",padding:"28px 16px"}}>
             {tab==="teams"    && <TeamsView    teams={teams} setTeams={setTeams} levels={levels} brackets={brackets} setModal={setModal} setEditTeam={setEditTeam}/>}
             {tab==="brackets" && <BracketView  teams={teams} levels={levels} brackets={brackets}/>}
-            {tab==="schedule" && <ScheduleView teams={teams} schedule={schedule} setSchedule={setSchedule} matchStates={matchStates} setMatchStates={setMatchStates} updateMatchState={updateMatchState} regenCount={regenCount} setRegenCount={setRegenCount} setScheduleVersion={setScheduleVersion}/>}
+            {tab==="schedule" && <ScheduleView teams={teams} schedule={schedule} setSchedule={setSchedule} matchStates={matchStates} setMatchStates={setMatchStates} updateMatchState={updateMatchState} setScheduleVersion={setScheduleVersion}/>}
             {tab==="results"  && <ResultsView  teams={teams} schedule={schedule} matchStates={matchStates} levels={levels} brackets={brackets}/>}
             {tab==="knockout" && <KnockoutView teams={teams} schedule={schedule} matchStates={matchStates}/>}
             {tab==="settings" && <SettingsView levels={levels} setLevels={setLevels} brackets={brackets} setBrackets={setBrackets} adminPin={adminPin} setAdminPin={setAdminPin} onLogout={()=>setRole(null)}/>}
