@@ -106,8 +106,12 @@ const COLLECTION = "pawsmash";
 const DOC_ID     = "tournament";
 
 function getTournamentRef() {
-  try { return firebase.firestore().collection(COLLECTION).doc(DOC_ID); }
-  catch(e) { console.error("Firestore ref error:", e); return null; }
+  try {
+    const db = firebase.firestore();
+    console.log("🔥 Firestore instance:", !!db);
+    return db.collection(COLLECTION).doc(DOC_ID);
+  }
+  catch(e) { console.error("❌ Firestore ref error:", e); return null; }
 }
 
 // Central store — shared across all useSharedState hooks
@@ -138,8 +142,11 @@ function _ensureListening() {
 async function saveField(field, value) {
   try {
     const ref = getTournamentRef();
-    if (ref) await ref.set({ [field]: value }, { merge: true });
-  } catch(e) { console.error("Save error:", e); }
+    if (!ref) { console.error("saveField: no ref for field", field); return; }
+    console.log("💾 Saving field:", field);
+    await ref.set({ [field]: value }, { merge: true });
+    console.log("✅ Saved:", field);
+  } catch(e) { console.error("❌ Save error for field", field, e); }
 }
 
 // Load full doc once (for initial hydration before snapshot fires)
