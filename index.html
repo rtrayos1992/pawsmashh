@@ -4,29 +4,16 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Paw Smash — Play for Strays</title>
-
-  <!-- React 18 -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <!-- Babel (JSX transpiler) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-  <!-- Firebase 10 (modular, browser builds exposed as globals) -->
-  <script type="module">
-    import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-    window.FirebaseApp       = { initializeApp, getApps };
-    window.FirebaseFirestore = { getFirestore, doc, getDoc, setDoc, onSnapshot };
-    window._firebaseReady = true;
-  </script>
-
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0d0a0b; }
     select, select option { background: #2a1520 !important; color: #fff !important; }
     select { color-scheme: dark; }
     input[type=number]::-webkit-inner-spin-button { opacity: 0.4; }
-    textarea { color: #fff; }
+    textarea { color: #fff; background: #221518; }
   </style>
 </head>
 <body>
@@ -91,100 +78,6 @@ function useLocalStorage(key, initial) {
   return [value, set];
 }
 
-// ── Firebase Firestore sync ─────────────────────────────────────────
-// All shared tournament data lives in a single Firestore document
-// so every device (admin + players) sees the same data in real time.
-//
-// Document path: pawsmash/tournament
-// Fields: teams, schedule, matchStates, koData, koFormats,
-//         regenCount, scheduleVersion
-
-function getFirebaseConfig() {
-  try { return JSON.parse(localStorage.getItem("ps_firebase_config")) || null; }
-  catch { return null; }
-}
-function saveFirebaseConfig(cfg) {
-  localStorage.setItem("ps_firebase_config", JSON.stringify(cfg));
-}
-
-// Initialise Firebase app (idempotent)
-let _db = null;
-function getDb() {
-  if (_db) return _db;
-  const cfg = getFirebaseConfig();
-  if (!cfg) return null;
-  try {
-    const { initializeApp, getApps } = window.FirebaseApp;
-    const { getFirestore } = window.FirebaseFirestore;
-    const existing = getApps().find(a => a.name === "pawsmash");
-    const app = existing || initializeApp(cfg, "pawsmash");
-    _db = getFirestore(app);
-    return _db;
-  } catch(e) { console.error("Firebase init error:", e); return null; }
-}
-
-const TOURNAMENT_DOC = "tournament";
-const COLLECTION     = "pawsmash";
-
-async function fsGet() {
-  const db = getDb(); if (!db) return null;
-  const { doc, getDoc } = window.FirebaseFirestore;
-  try {
-    const snap = await getDoc(doc(db, COLLECTION, TOURNAMENT_DOC));
-    return snap.exists() ? snap.data() : null;
-  } catch(e) { console.error("fsGet error", e); return null; }
-}
-
-async function fsSet(data) {
-  const db = getDb(); if (!db) return;
-  const { doc, setDoc } = window.FirebaseFirestore;
-  try { await setDoc(doc(db, COLLECTION, TOURNAMENT_DOC), data, { merge: true }); }
-  catch(e) { console.error("fsSet error", e); }
-}
-
-function fsListen(callback) {
-  const db = getDb(); if (!db) return () => {};
-  const { doc, onSnapshot } = window.FirebaseFirestore;
-  return onSnapshot(doc(db, COLLECTION, TOURNAMENT_DOC), snap => {
-    if (snap.exists()) callback(snap.data());
-  }, err => console.error("fsListen error", err));
-}
-
-// Hook: syncs a field of the shared Firestore document
-// Falls back to localStorage if Firebase not configured
-function useSharedState(field, initial) {
-  const lsKey = `ps_${field}`;
-  const [value, setValue] = useState(() => {
-    try { const s = localStorage.getItem(lsKey); return s !== null ? JSON.parse(s) : initial; }
-    catch { return initial; }
-  });
-  const [synced, setSynced] = useState(false);
-
-  // Subscribe to Firestore on mount
-  useState(() => {
-    const db = getDb();
-    if (!db) return;
-    const unsub = fsListen(data => {
-      if (field in data) {
-        setValue(data[field]);
-        setSynced(true);
-        try { localStorage.setItem(lsKey, JSON.stringify(data[field])); } catch {}
-      }
-    });
-    return unsub;
-  });
-
-  const set = useCallback(updater => {
-    setValue(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      try { localStorage.setItem(lsKey, JSON.stringify(next)); } catch {}
-      fsSet({ [field]: next });
-      return next;
-    });
-  }, [field]);
-
-  return [value, set];
-}
 
 function generateRR(teams) {
   if (teams.length < 2) return [];
@@ -1169,9 +1062,9 @@ function KOMatchCard({ homeTeam, awayTeam, matchData, onUpdate, roundLabel, matc
 function KnockoutView({ teams, schedule, matchStates }) {
   const [selectedLevel, setSelectedLevel] = useState("B");
   // koFormats: { [level]: "final"|"sf"|"qf" }
-  const [koFormats, setKoFormats] = useSharedState("koFormats", { B:"qf", C:"qf", D:"sf", E:"final" });
+  const [koFormats, setKoFormats] = useLocalStorage("ps_koFormats", { B:"qf", C:"qf", D:"sf", E:"final" });
   // koData: { [level]: { [matchKey]: { homeTeam, awayTeam, scoreHome, scoreAway, winner } } }
-  const [koData, setKoData] = useSharedState("koData", {});
+  const [koData, setKoData] = useLocalStorage("ps_koData", {});
   const [showSeedModal, setShowSeedModal] = useState(false);
   const [assignTarget, setAssignTarget] = useState(null); // { key, slot }
 
@@ -1411,7 +1304,7 @@ function KnockoutView({ teams, schedule, matchStates }) {
 /* ══════════════════════════════════════════════════════
    SETTINGS VIEW
 ══════════════════════════════════════════════════════ */
-function SettingsView({ levels, setLevels, brackets, setBrackets, adminPin, setAdminPin, onLogout, fbReady, onSetupFirebase }) {
+function SettingsView({ levels, setLevels, brackets, setBrackets, adminPin, setAdminPin, onLogout }) {
   const toggle = (arr, set, val, isNum) =>
     set(prev => prev.includes(val) ? prev.filter(x=>x!==val) : [...prev,val].sort(isNum?(a,b)=>a-b:undefined));
 
@@ -1485,18 +1378,6 @@ function SettingsView({ levels, setLevels, brackets, setBrackets, adminPin, setA
         </div>
       </div>
 
-      {/* Firebase */}
-      <div style={{marginBottom:16,background:C.card,border:`1px solid ${fbReady?"rgba(46,204,113,0.3)":C.border}`,borderRadius:16,padding:"16px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
-        <div>
-          <div style={{color:fbReady?"#2ecc71":C.muted,fontWeight:700,fontSize:13}}>{fbReady?"🔥 Firebase Connected":"☁️ Firebase Not Connected"}</div>
-          <div style={{color:C.muted,fontSize:12,marginTop:2}}>{fbReady?"Live sync active — all devices see the same data":"Connect Firebase so players see the schedule too"}</div>
-        </div>
-        <button onClick={onSetupFirebase}
-          style={{...secondaryBtn,padding:"8px 16px",fontSize:12,flexShrink:0}}>
-          {fbReady?"Reconfigure":"Connect →"}
-        </button>
-      </div>
-
       {/* Logout */}
       <div style={{background:"rgba(231,76,60,0.08)",border:"1px solid rgba(231,76,60,0.25)",borderRadius:16,padding:"16px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
         <div>
@@ -1512,86 +1393,6 @@ function SettingsView({ levels, setLevels, brackets, setBrackets, adminPin, setA
   );
 }
 
-
-/* ══════════════════════════════════════════════════════
-   FIREBASE SETUP SCREEN
-   Shown once to admin when no Firebase config is saved.
-   Players can skip — they just won't see live data.
-══════════════════════════════════════════════════════ */
-function FirebaseSetupScreen({ onDone }) {
-  const [cfg, setCfg] = useState("");
-  const [error, setError] = useState("");
-  const [testing, setTesting] = useState(false);
-
-  async function handleSave() {
-    setError(""); setTesting(true);
-    try {
-      const parsed = JSON.parse(cfg.trim()
-        .replace(/^const firebaseConfig\s*=\s*/, "")
-        .replace(/;?\s*$/, ""));
-      const required = ["apiKey","authDomain","projectId"];
-      const missing = required.filter(k => !parsed[k]);
-      if (missing.length) { setError(`Missing fields: ${missing.join(", ")}`); setTesting(false); return; }
-      saveFirebaseConfig(parsed);
-      _db = null; // reset so getDb() re-initialises
-      // Quick test write
-      await fsSet({ _setup: Date.now() });
-      onDone();
-    } catch(e) {
-      setError("Invalid config — " + (e.message || "paste the firebaseConfig object"));
-      setTesting(false);
-    }
-  }
-
-  return (
-    <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'DM Sans',sans-serif"}}>
-      <PawBg/>
-      <div style={{position:"relative",zIndex:1,width:"100%",maxWidth:520}}>
-        <div style={{textAlign:"center",marginBottom:28}}>
-          <PawSmashLogo/>
-          <div style={{color:C.white,fontSize:18,fontWeight:700,fontFamily:"'Fredoka One',sans-serif",marginTop:16,letterSpacing:1}}>Connect to Firebase</div>
-          <div style={{color:C.muted,fontSize:13,marginTop:8,lineHeight:1.6}}>
-            This lets every device see the same live schedule.<br/>
-            <span style={{color:C.pink}}>Free tier</span> — no credit card needed.
-          </div>
-        </div>
-
-        <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:"24px"}}>
-          <div style={{color:C.pink,fontSize:11,fontWeight:700,letterSpacing:2,marginBottom:6}}>HOW TO SET UP (2 min)</div>
-          <ol style={{color:C.muted,fontSize:12,lineHeight:2,paddingLeft:18,marginBottom:20}}>
-            <li>Go to <span style={{color:C.pinkLight}}>console.firebase.google.com</span></li>
-            <li>Create a project → Add a Web App</li>
-            <li>Copy the <code style={{background:C.faint,padding:"1px 5px",borderRadius:4,color:C.pinkLight}}>firebaseConfig</code> object</li>
-            <li>In Firestore → Rules, set read/write to <code style={{background:C.faint,padding:"1px 5px",borderRadius:4,color:"#2ecc71}}>allow read, write: if true;</code></li>
-            <li>Paste it below and click Connect</li>
-          </ol>
-
-          <label style={{...labelSt,marginBottom:6}}>Paste your firebaseConfig here</label>
-          <textarea
-            value={cfg} onChange={e=>{setCfg(e.target.value);setError("");}}
-            placeholder='{&#10;  "apiKey": "...",&#10;  "authDomain": "...",&#10;  "projectId": "...",&#10;  ...&#10;}'
-            rows={8}
-            style={{...SEL,fontFamily:"monospace",fontSize:12,lineHeight:1.6,resize:"vertical",marginBottom:12}}
-          />
-          {error && <div style={{color:"#e74c3c",fontSize:12,marginBottom:10}}>⚠️ {error}</div>}
-          <div style={{display:"flex",gap:10}}>
-            <button onClick={handleSave} disabled={testing || !cfg.trim()}
-              style={{...primaryBtn,flex:1,opacity:testing||!cfg.trim()?0.5:1,cursor:testing||!cfg.trim()?"not-allowed":"pointer"}}>
-              {testing ? "⏳ Connecting..." : "🔥 Connect to Firebase"}
-            </button>
-            <button onClick={onDone}
-              style={{...secondaryBtn,padding:"10px 16px",fontSize:12}}>
-              Skip →
-            </button>
-          </div>
-          <div style={{color:C.muted,fontSize:11,marginTop:12,textAlign:"center"}}>
-            Skipping means data only saves on this device.
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /* ══════════════════════════════════════════════════════
    LOGIN SCREEN
@@ -1776,12 +1577,11 @@ const TABS = [
 function App() {
   // ── Role: null = login screen, "admin" = full access, "player" = read-only ──
   const [role,    setRole]    = useLocalStorage("ps_role", null);
-  const [fbReady, setFbReady] = useState(() => !!getFirebaseConfig());
-  const [showFbSetup, setShowFbSetup] = useState(false);
+
 
   // ── Shared data (loaded regardless of role) ──
-  const [teams,        setTeams]        = useSharedState("teams", INITIAL_TEAMS);
-  const [scheduleVersion, setScheduleVersion] = useSharedState("scheduleVersion", "");
+  const [teams,        setTeams]        = useLocalStorage("ps_teams", INITIAL_TEAMS);
+  const [scheduleVersion, setScheduleVersion] = useLocalStorage("ps_schedule_version", "");
   // Clear stale schedule built by an older algorithm
   if (scheduleVersion !== "" && scheduleVersion !== SCHEDULE_VERSION) {
     setSchedule([]);
@@ -1789,9 +1589,9 @@ function App() {
     setRegenCount(3);
     setScheduleVersion(SCHEDULE_VERSION);
   }
-  const [schedule,     setSchedule]     = useSharedState("schedule", []);
-  const [matchStates,  setMatchStates]  = useSharedState("matchStates", {});
-  const [regenCount,   setRegenCount]   = useSharedState("regenCount", 3);
+  const [schedule,     setSchedule]     = useLocalStorage("ps_schedule", []);
+  const [matchStates,  setMatchStates]  = useLocalStorage("ps_matchStates", {});
+  const [regenCount,   setRegenCount]   = useLocalStorage("ps_regen_count", 3);
 
   const sharedStyles = (
     <>
@@ -1800,14 +1600,9 @@ function App() {
     </>
   );
 
-  // ── Firebase setup (admin only, first time) ──
-  if (showFbSetup) return (
-    <>{sharedStyles}<FirebaseSetupScreen onDone={()=>{ setFbReady(!!getFirebaseConfig()); setShowFbSetup(false); _db=null; }}/></>
-  );
-
   // ── Show login screen if no role ──
   if (!role) return (
-    <>{sharedStyles}<LoginScreen onLogin={r => { setRole(r); if (r==="admin" && !getFirebaseConfig()) setShowFbSetup(true); }}/></>
+    <>{sharedStyles}<LoginScreen onLogin={setRole}/></>
   );
 
   // ── Player view: schedule only, read-only ──
@@ -1889,9 +1684,7 @@ function App() {
                     </div>
                   ))}
                   <div style={{background:"rgba(233,30,140,0.15)",border:`1px solid ${C.pink}44`,borderRadius:8,padding:"4px 10px",color:C.pink,fontSize:10,fontWeight:700,letterSpacing:1}}>🛡️ ADMIN</div>
-                  <div style={{background:fbReady?"rgba(46,204,113,0.15)":"rgba(255,200,0,0.1)",border:`1px solid ${fbReady?"rgba(46,204,113,0.4)":"rgba(255,200,0,0.3)"}`,borderRadius:8,padding:"4px 10px",color:fbReady?"#2ecc71":"#f1c40f",fontSize:10,fontWeight:700,letterSpacing:1,cursor:fbReady?"default":"pointer"}} onClick={()=>!fbReady&&setShowFbSetup(true)} title={fbReady?"Syncing to Firebase":"Click to connect Firebase"}>
-                    {fbReady ? "🔥 LIVE SYNC" : "⚠️ LOCAL ONLY"}
-                  </div>
+
                   <button onClick={()=>setRole(null)} title="Sign out"
                     style={{background:"rgba(231,76,60,0.1)",border:"1px solid rgba(231,76,60,0.3)",borderRadius:8,padding:"6px 12px",color:"#e74c3c",fontSize:11,fontWeight:700,cursor:"pointer"}}>
                     🚪 Exit
@@ -1917,7 +1710,7 @@ function App() {
             {tab==="schedule" && <ScheduleView teams={teams} schedule={schedule} setSchedule={setSchedule} matchStates={matchStates} setMatchStates={setMatchStates} updateMatchState={updateMatchState} regenCount={regenCount} setRegenCount={setRegenCount} setScheduleVersion={setScheduleVersion}/>}
             {tab==="results"  && <ResultsView  teams={teams} schedule={schedule} matchStates={matchStates} levels={levels} brackets={brackets}/>}
             {tab==="knockout" && <KnockoutView teams={teams} schedule={schedule} matchStates={matchStates}/>}
-            {tab==="settings" && <SettingsView levels={levels} setLevels={setLevels} brackets={brackets} setBrackets={setBrackets} adminPin={adminPin} setAdminPin={setAdminPin} onLogout={()=>setRole(null)} fbReady={fbReady} onSetupFirebase={()=>setShowFbSetup(true)}/>}
+            {tab==="settings" && <SettingsView levels={levels} setLevels={setLevels} brackets={brackets} setBrackets={setBrackets} adminPin={adminPin} setAdminPin={setAdminPin} onLogout={()=>setRole(null)}/>}
           </div>
 
         </div>
@@ -1939,39 +1732,7 @@ function App() {
 }
 
 
-    // Wait for Firebase module to load before mounting
-    function mount() {
-      const root = ReactDOM.createRoot(document.getElementById("root"));
-      root.render(React.createElement(App));
-    }
-    if (window._firebaseReady) { mount(); }
-    else {
-      const t = setInterval(() => { if (window._firebaseReady) { clearInterval(t); mount(); } }, 50);
-    }
+    ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
   </script>
 </body>
 </html>
-
-<script type="module">
-  // Import the functions you need from the SDKs you need
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
-  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-analytics.js";
-  // TODO: Add SDKs for Firebase products that you want to use
-  // https://firebase.google.com/docs/web/setup#available-libraries
-
-  // Your web app's Firebase configuration
-  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-  const firebaseConfig = {
-    apiKey: "AIzaSyAaYvPUzMmzCeSl0409U0qpIjsZXc8LnTU",
-    authDomain: "pawsmash-b1a95.firebaseapp.com",
-    projectId: "pawsmash-b1a95",
-    storageBucket: "pawsmash-b1a95.firebasestorage.app",
-    messagingSenderId: "59923110347",
-    appId: "1:59923110347:web:8393f08f3be5faebb37e4e",
-    measurementId: "G-GY66DTK8NY"
-  };
-
-  // Initialize Firebase
-  const app = initializeApp(firebaseConfig);
-  const analytics = getAnalytics(app);
-</script>
