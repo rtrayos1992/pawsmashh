@@ -129,6 +129,7 @@ function _ensureListening() {
   if (_unsubscribe) return;
   const ref = getTournamentRef();
   if (!ref) return;
+  // onSnapshot fires immediately with current data, then on every change
   _unsubscribe = ref.onSnapshot(snap => {
     if (snap && snap.exists) _notify(snap.data());
   }, err => { console.error("onSnapshot error:", err); _unsubscribe = null; });
@@ -188,18 +189,7 @@ function useSharedState(field, initial) {
   return [value, set];
 }
 
-// App-level loading gate — fetches full doc once before first render
-// so all fields are hydrated simultaneously, preventing blank flash
-function useFirestoreReady() {
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    loadAll().then(data => {
-      if (Object.keys(data).length > 0) _notify(data);
-      setReady(true);
-    });
-  }, []);
-  return ready;
-}
+
 
 
 function generateRR(teams) {
@@ -1855,7 +1845,6 @@ const TABS = [
 function App() {
   // ── Role: null = login screen, "admin" = full access, "player" = read-only ──
   const [role,    setRole]    = useLocalStorage("ps_role", null);
-  const fsReady = useFirestoreReady(); // waits for Firestore to hydrate all fields
 
 
   // ── Shared data (loaded regardless of role) ──
@@ -1879,18 +1868,7 @@ function App() {
     </>
   );
 
-  // ── Loading screen while Firestore hydrates ──
-  if (!fsReady) return (
-    <>
-      {sharedStyles}
-      <div style={{minHeight:"100vh",background:"#0d0a0b",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,fontFamily:"'DM Sans',sans-serif"}}>
-        <div style={{fontSize:48}}>🐾</div>
-        <div style={{fontFamily:"'Fredoka One',sans-serif",fontSize:24,color:"#e91e8c",letterSpacing:2}}>PAW SMASH</div>
-        <div style={{width:36,height:36,border:"3px solid rgba(233,30,140,0.2)",borderTop:"3px solid #e91e8c",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
-        <div style={{color:"rgba(255,255,255,0.4)",fontSize:13}}>Loading tournament data...</div>
-      </div>
-    </>
-  );
+
 
   // ── Show login screen if no role ──
   if (!role) return (
