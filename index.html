@@ -99,21 +99,39 @@ function useLocalStorage(key, initial) {
 }
 
 // ── Firebase Firestore sync ──────────────────────────────────────────
-// Tournament data lives in Firestore: pawsmash/tournament
-// Admin writes sync to all players in real time via onSnapshot
+// Single document: pawsmash/tournament
+// One onSnapshot listener feeds all fields — no blank flash on load.
 
 const COLLECTION = "pawsmash";
 const DOC_ID     = "tournament";
 
-function getDb() {
-  try {
-    return firebase.firestore();
-  } catch(e) { console.error("Firestore error:", e); return null; }
+function getTournamentRef() {
+  try { return firebase.firestore().collection(COLLECTION).doc(DOC_ID); }
+  catch(e) { console.error("Firestore ref error:", e); return null; }
 }
 
-function getTournamentRef() {
-  const db = getDb();
-  return db ? db.collection(COLLECTION).doc(DOC_ID) : null;
+// Central store — shared across all useSharedState hooks
+const _listeners = {};   // field → Set of setState callbacks
+let   _docData   = null; // last known full document
+
+function _notify(data) {
+  _docData = data;
+  Object.keys(_listeners).forEach(field => {
+    if (field in data) {
+      _listeners[field].forEach(fn => fn(data[field]));
+    }
+  });
+}
+
+// Single global onSnapshot — starts once, feeds every hook
+let _unsubscribe = null;
+function _ensureListening() {
+  if (_unsubscribe) return;
+  const ref = getTournamentRef();
+  if (!ref) return;
+  _unsubscribe = ref.onSnapshot(snap => {
+    if (snap && snap.exists) _notify(snap.data());
+  }, err => { console.error("onSnapshot error:", err); _unsubscribe = null; });
 }
 
 async function saveField(field, value) {
@@ -123,28 +141,39 @@ async function saveField(field, value) {
   } catch(e) { console.error("Save error:", e); }
 }
 
-// Hook: syncs one field with Firestore, real-time for all devices
+// Load full doc once (for initial hydration before snapshot fires)
+async function loadAll() {
+  try {
+    const ref = getTournamentRef();
+    if (!ref) return {};
+    const snap = await ref.get();
+    return (snap && snap.exists) ? snap.data() : {};
+  } catch(e) { return {}; }
+}
+
+// Hook: one field of the shared document
 function useSharedState(field, initial) {
   const lsKey = `ps_${field}`;
   const [value, setValue] = useState(() => {
+    // Seed from localStorage so UI shows instantly without flicker
     try { const s = localStorage.getItem(lsKey); return s !== null ? JSON.parse(s) : initial; }
     catch { return initial; }
   });
 
-  // Load latest + subscribe to live changes via onSnapshot
   useEffect(() => {
-    const ref = getTournamentRef();
-    if (!ref) return;
-    const unsub = ref.onSnapshot(snap => {
-      if (snap.exists) {
-        const data = snap.data();
-        if (field in data) {
-          setValue(data[field]);
-          try { localStorage.setItem(lsKey, JSON.stringify(data[field])); } catch {}
-        }
-      }
-    }, err => console.error("onSnapshot error:", err));
-    return unsub;
+    // Register this field's setter with the central listener map
+    if (!_listeners[field]) _listeners[field] = new Set();
+    const handler = val => {
+      setValue(val);
+      try { localStorage.setItem(lsKey, JSON.stringify(val)); } catch {}
+    };
+    _listeners[field].add(handler);
+    _ensureListening();
+
+    // If we already have doc data (another hook loaded it first), apply now
+    if (_docData && field in _docData) handler(_docData[field]);
+
+    return () => { _listeners[field].delete(handler); };
   }, [field]);
 
   const set = useCallback(updater => {
@@ -157,6 +186,19 @@ function useSharedState(field, initial) {
   }, [field]);
 
   return [value, set];
+}
+
+// App-level loading gate — fetches full doc once before first render
+// so all fields are hydrated simultaneously, preventing blank flash
+function useFirestoreReady() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    loadAll().then(data => {
+      if (Object.keys(data).length > 0) _notify(data);
+      setReady(true);
+    });
+  }, []);
+  return ready;
 }
 
 
@@ -1813,6 +1855,7 @@ const TABS = [
 function App() {
   // ── Role: null = login screen, "admin" = full access, "player" = read-only ──
   const [role,    setRole]    = useLocalStorage("ps_role", null);
+  const fsReady = useFirestoreReady(); // waits for Firestore to hydrate all fields
 
 
   // ── Shared data (loaded regardless of role) ──
@@ -1832,7 +1875,20 @@ function App() {
   const sharedStyles = (
     <>
       <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=DM+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
-      <style>{`*, *::before, *::after { box-sizing: border-box; } select, select option { background: #2a1520 !important; color: #fff !important; } select { color-scheme: dark; }`}</style>
+      <style>{`*, *::before, *::after { box-sizing: border-box; } select, select option { background: #2a1520 !important; color: #fff !important; } select { color-scheme: dark; } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </>
+  );
+
+  // ── Loading screen while Firestore hydrates ──
+  if (!fsReady) return (
+    <>
+      {sharedStyles}
+      <div style={{minHeight:"100vh",background:"#0d0a0b",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,fontFamily:"'DM Sans',sans-serif"}}>
+        <div style={{fontSize:48}}>🐾</div>
+        <div style={{fontFamily:"'Fredoka One',sans-serif",fontSize:24,color:"#e91e8c",letterSpacing:2}}>PAW SMASH</div>
+        <div style={{width:36,height:36,border:"3px solid rgba(233,30,140,0.2)",borderTop:"3px solid #e91e8c",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+        <div style={{color:"rgba(255,255,255,0.4)",fontSize:13}}>Loading tournament data...</div>
+      </div>
     </>
   );
 
