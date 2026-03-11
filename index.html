@@ -265,25 +265,32 @@ function buildSchedule(teams) {
   return out;
 }
 
+function isDone(s) {
+  // A match counts as played if marked done OR if a winner was set
+  return s?.matchStatus === "done" || !!s?.winner;
+}
+
 function computeStandings(teams, matches, matchStates) {
   return [...teams].map(t => {
-    const games = matches.filter(m => m.home.id===t.id || m.away.id===t.id);
-    const played = games.filter(m => matchStates[m.id]?.winner).length;
+    const games  = matches.filter(m => m.home.id===t.id || m.away.id===t.id);
+    const played = games.filter(m => isDone(matchStates[m.id])).length;
     const wins   = games.filter(m => {
       const s = matchStates[m.id];
-      return s && ((m.home.id===t.id && s.winner==="home") || (m.away.id===t.id && s.winner==="away"));
+      return s?.winner && ((m.home.id===t.id && s.winner==="home") || (m.away.id===t.id && s.winner==="away"));
     }).length;
     const losses = games.filter(m => {
       const s = matchStates[m.id];
-      return s && ((m.home.id===t.id && s.winner==="away") || (m.away.id===t.id && s.winner==="home"));
+      return s?.winner && ((m.home.id===t.id && s.winner==="away") || (m.away.id===t.id && s.winner==="home"));
     }).length;
     const pf = games.reduce((acc,m) => {
-      const s = matchStates[m.id]; if (!s?.winner) return acc;
-      return acc + Number(m.home.id===t.id ? s.scoreHome||0 : s.scoreAway||0);
+      const s = matchStates[m.id];
+      if (!isDone(s)) return acc;
+      return acc + Number(m.home.id===t.id ? s?.scoreHome||0 : s?.scoreAway||0);
     }, 0);
     const pa = games.reduce((acc,m) => {
-      const s = matchStates[m.id]; if (!s?.winner) return acc;
-      return acc + Number(m.home.id===t.id ? s.scoreAway||0 : s.scoreHome||0);
+      const s = matchStates[m.id];
+      if (!isDone(s)) return acc;
+      return acc + Number(m.home.id===t.id ? s?.scoreAway||0 : s?.scoreHome||0);
     }, 0);
     return { team:t, played, wins, losses, pf, pa };
   }).sort((a,b) => b.wins - a.wins || (b.pf-b.pa) - (a.pf-a.pa));
@@ -294,82 +301,82 @@ function computeStandings(teams, matches, matchStates) {
 ══════════════════════════════════════════════════════ */
 const INITIAL_TEAMS = [
   // Level E – Bracket 1
-  {id:uid(),level:"E",bracket:1,player1:"Jenn Danganan",       player2:"Kathreen Ydel",          name:""},
-  {id:uid(),level:"E",bracket:1,player1:"Patricia Luta",        player2:"Ceferino Luta 3",        name:""},
-  {id:uid(),level:"E",bracket:1,player1:"Xian Carlo Bangate",   player2:"Xyrille",                name:""},
-  {id:uid(),level:"E",bracket:1,player1:"Ruth Partida",         player2:"Mark Marasigan",         name:""},
-  {id:uid(),level:"E",bracket:1,player1:"Jessie De Guzman",     player2:"Shiena Hernandez",       name:""},
+  {id:"6b48c057c",level:"E",bracket:1,player1:"Jenn Danganan",       player2:"Kathreen Ydel",          name:""},
+  {id:"13a643c0c",level:"E",bracket:1,player1:"Patricia Luta",        player2:"Ceferino Luta 3",        name:""},
+  {id:"3f6c7372a",level:"E",bracket:1,player1:"Xian Carlo Bangate",   player2:"Xyrille",                name:""},
+  {id:"e62d3796e",level:"E",bracket:1,player1:"Ruth Partida",         player2:"Mark Marasigan",         name:""},
+  {id:"b753880a4",level:"E",bracket:1,player1:"Jessie De Guzman",     player2:"Shiena Hernandez",       name:""},
   // Level E – Bracket 2
-  {id:uid(),level:"E",bracket:2,player1:"Jason Cansino",        player2:"Kaye Cansino",           name:""},
-  {id:uid(),level:"E",bracket:2,player1:"Robin Vicente",        player2:"Ram Mendoza",            name:""},
-  {id:uid(),level:"E",bracket:2,player1:"Kalvin Dacusin",       player2:"Paul Anatalio",          name:""},
-  {id:uid(),level:"E",bracket:2,player1:"Apollo",               player2:"Cousin",                 name:""},
+  {id:"39c96e04f",level:"E",bracket:2,player1:"Jason Cansino",        player2:"Kaye Cansino",           name:""},
+  {id:"3a112ba1b",level:"E",bracket:2,player1:"Robin Vicente",        player2:"Ram Mendoza",            name:""},
+  {id:"ba34b5e83",level:"E",bracket:2,player1:"Kalvin Dacusin",       player2:"Paul Anatalio",          name:""},
+  {id:"77de380a0",level:"E",bracket:2,player1:"Apollo",               player2:"Cousin",                 name:""},
   // Level D – Bracket 1
-  {id:uid(),level:"D",bracket:1,player1:"Ralph Lopez",          player2:"Rick Diaz",              name:""},
-  {id:uid(),level:"D",bracket:1,player1:"Calbert",              player2:"Kiel Mabeza",            name:""},
-  {id:uid(),level:"D",bracket:1,player1:"Matthew Mirallosa",    player2:"Venice Mariel Develos",  name:""},
-  {id:uid(),level:"D",bracket:1,player1:"Anthony Longasa",      player2:"Joshua Sandova",         name:""},
+  {id:"857dc954c",level:"D",bracket:1,player1:"Ralph Lopez",          player2:"Rick Diaz",              name:""},
+  {id:"0ad5562eb",level:"D",bracket:1,player1:"Calbert",              player2:"Kiel Mabeza",            name:""},
+  {id:"edc7e6371",level:"D",bracket:1,player1:"Matthew Mirallosa",    player2:"Venice Mariel Develos",  name:""},
+  {id:"4c46c9385",level:"D",bracket:1,player1:"Anthony Longasa",      player2:"Joshua Sandova",         name:""},
   // Level D – Bracket 2
-  {id:uid(),level:"D",bracket:2,player1:"Jaymi Chow",           player2:"Juramer Itlanas",        name:""},
-  {id:uid(),level:"D",bracket:2,player1:"Ariadne Denzon",       player2:"Arlene Denzon",          name:""},
-  {id:uid(),level:"D",bracket:2,player1:"Franjet",              player2:"Thea",                   name:""},
-  {id:uid(),level:"D",bracket:2,player1:"Jean Lee",             player2:"Mike Arevalo",           name:""},
+  {id:"dca438d18",level:"D",bracket:2,player1:"Jaymi Chow",           player2:"Juramer Itlanas",        name:""},
+  {id:"9b1460ebd",level:"D",bracket:2,player1:"Ariadne Denzon",       player2:"Arlene Denzon",          name:""},
+  {id:"936d1582f",level:"D",bracket:2,player1:"Franjet",              player2:"Thea",                   name:""},
+  {id:"cb1b3cf1c",level:"D",bracket:2,player1:"Jean Lee",             player2:"Mike Arevalo",           name:""},
   // Level D – Bracket 3
-  {id:uid(),level:"D",bracket:3,player1:"Mimoy De Jesus",       player2:"Jayce Mamauag",          name:""},
-  {id:uid(),level:"D",bracket:3,player1:"Sheda Manota",         player2:"Rj Rayos",               name:""},
-  {id:uid(),level:"D",bracket:3,player1:"Jamaica Takahashi",    player2:"Leonard Medrano",        name:""},
-  {id:uid(),level:"D",bracket:3,player1:"Jason Oliver Lim",     player2:"Janella Dela Cruz",      name:""},
+  {id:"8b41549f6",level:"D",bracket:3,player1:"Mimoy De Jesus",       player2:"Jayce Mamauag",          name:""},
+  {id:"b08a81bc8",level:"D",bracket:3,player1:"Sheda Manota",         player2:"Rj Rayos",               name:""},
+  {id:"c89103da0",level:"D",bracket:3,player1:"Jamaica Takahashi",    player2:"Leonard Medrano",        name:""},
+  {id:"c13042567",level:"D",bracket:3,player1:"Jason Oliver Lim",     player2:"Janella Dela Cruz",      name:""},
   // Level D – Bracket 4
-  {id:uid(),level:"D",bracket:4,player1:"Bea Santos",           player2:"Christone Mallari",      name:""},
-  {id:uid(),level:"D",bracket:4,player1:"Claro Ebette",         player2:"Ruth Partida",           name:""},
-  {id:uid(),level:"D",bracket:4,player1:"Arielle Anchote",      player2:"Arnold Abucejo",         name:""},
-  {id:uid(),level:"D",bracket:4,player1:"Jozshelle Cruz",       player2:"Benjo Cruz",             name:""},
+  {id:"a05e71cdf",level:"D",bracket:4,player1:"Bea Santos",           player2:"Christone Mallari",      name:""},
+  {id:"4c341efdf",level:"D",bracket:4,player1:"Claro Ebette",         player2:"Ruth Partida",           name:""},
+  {id:"2eca4f019",level:"D",bracket:4,player1:"Arielle Anchote",      player2:"Arnold Abucejo",         name:""},
+  {id:"4c89e94f6",level:"D",bracket:4,player1:"Jozshelle Cruz",       player2:"Benjo Cruz",             name:""},
   // Level C – Brackets 1-8
-  {id:uid(),level:"C",bracket:1,player1:"JayJay",               player2:"Bhem",                   name:""},
-  {id:uid(),level:"C",bracket:1,player1:"Sunitha Zenith Flores",player2:"Mckheizer Oyales",       name:""},
-  {id:uid(),level:"C",bracket:1,player1:"Rizza",                player2:"Simeon",                 name:""},
-  {id:uid(),level:"C",bracket:1,player1:"Louie",                player2:"Harvey",                 name:""},
-  {id:uid(),level:"C",bracket:2,player1:"Crivelli Gispin",      player2:"Kevin Badilla",          name:""},
-  {id:uid(),level:"C",bracket:2,player1:"Glenn Teves",          player2:"Jay AR",                 name:""},
-  {id:uid(),level:"C",bracket:2,player1:"Jhoven Roldan",        player2:"Mark Steven Quinto",     name:""},
-  {id:uid(),level:"C",bracket:2,player1:"Prince Jeuf Camuta",   player2:"Zyrille Camuta",         name:""},
-  {id:uid(),level:"C",bracket:3,player1:"MJ Royo",              player2:"Doc JC",                 name:""},
-  {id:uid(),level:"C",bracket:3,player1:"Keith Suallo",         player2:"Jan Kristian Mirabel",   name:""},
-  {id:uid(),level:"C",bracket:3,player1:"Krissy",               player2:"Mark Leosala",           name:""},
-  {id:uid(),level:"C",bracket:3,player1:"Ronie Gaje",           player2:"Diane Patron",           name:""},
-  {id:uid(),level:"C",bracket:4,player1:"Ken Cotoner",          player2:"James Duran",            name:""},
-  {id:uid(),level:"C",bracket:4,player1:"Lily Camat",           player2:"Jeff Orbegoso",          name:""},
-  {id:uid(),level:"C",bracket:4,player1:"Allan Tamayo",         player2:"Cristina Trabal",        name:""},
-  {id:uid(),level:"C",bracket:4,player1:"Paul Esquillon",       player2:"Rose Lyn Villanueva",    name:""},
-  {id:uid(),level:"C",bracket:5,player1:"Jerald Tuliao",        player2:"Deuzette De Dios",       name:""},
-  {id:uid(),level:"C",bracket:5,player1:"Oliver Cesumission",   player2:"Jameela Cruz",           name:""},
-  {id:uid(),level:"C",bracket:5,player1:"Barbie Macaraeg",      player2:"Nom",                    name:""},
-  {id:uid(),level:"C",bracket:5,player1:"Xena Bugayong",        player2:"Oliver Jed Balgos",      name:""},
-  {id:uid(),level:"C",bracket:6,player1:"Ivan Canlas",          player2:"Charlson Tolentino",     name:""},
-  {id:uid(),level:"C",bracket:6,player1:"Jeffrey Carillo",      player2:"Rex Mabeza",             name:""},
-  {id:uid(),level:"C",bracket:6,player1:"Bion Henrik Priolo",   player2:"Jason Andrew Naraval",   name:""},
-  {id:uid(),level:"C",bracket:6,player1:"Jeric Brioso",         player2:"RK Ocampo",              name:""},
-  {id:uid(),level:"C",bracket:7,player1:"Bea Cegama Santos",    player2:"Paul Benjamin Lauzon",   name:""},
-  {id:uid(),level:"C",bracket:7,player1:"Tony Rose Dacdac",     player2:"Kean Johan Salangsang",  name:""},
-  {id:uid(),level:"C",bracket:7,player1:"Kat Alberto",          player2:"Dominic Alberto",        name:""},
-  {id:uid(),level:"C",bracket:7,player1:"Jay R Cabatas",        player2:"Anne Matias",            name:""},
-  {id:uid(),level:"C",bracket:8,player1:"John Etom",            player2:"Jonathan Santelices",    name:""},
-  {id:uid(),level:"C",bracket:8,player1:"Sean Paul Jimenez",    player2:"Isiah Lawrence Quitoras",name:""},
-  {id:uid(),level:"C",bracket:8,player1:"Arthur Reyes",         player2:"Rowie Jane Nuval",       name:""},
-  {id:uid(),level:"C",bracket:8,player1:"Papi",                 player2:"Aaron",                  name:""},
+  {id:"42d40a564",level:"C",bracket:1,player1:"JayJay",               player2:"Bhem",                   name:""},
+  {id:"7a404e766",level:"C",bracket:1,player1:"Sunitha Zenith Flores",player2:"Mckheizer Oyales",       name:""},
+  {id:"f001836a1",level:"C",bracket:1,player1:"Rizza",                player2:"Simeon",                 name:""},
+  {id:"7abebffd6",level:"C",bracket:1,player1:"Louie",                player2:"Harvey",                 name:""},
+  {id:"686c51e26",level:"C",bracket:2,player1:"Crivelli Gispin",      player2:"Kevin Badilla",          name:""},
+  {id:"bf60bd5b8",level:"C",bracket:2,player1:"Glenn Teves",          player2:"Jay AR",                 name:""},
+  {id:"9b263a88b",level:"C",bracket:2,player1:"Jhoven Roldan",        player2:"Mark Steven Quinto",     name:""},
+  {id:"08241b08c",level:"C",bracket:2,player1:"Prince Jeuf Camuta",   player2:"Zyrille Camuta",         name:""},
+  {id:"23acddf24",level:"C",bracket:3,player1:"MJ Royo",              player2:"Doc JC",                 name:""},
+  {id:"570a26dde",level:"C",bracket:3,player1:"Keith Suallo",         player2:"Jan Kristian Mirabel",   name:""},
+  {id:"44e826432",level:"C",bracket:3,player1:"Krissy",               player2:"Mark Leosala",           name:""},
+  {id:"eb63bd0dd",level:"C",bracket:3,player1:"Ronie Gaje",           player2:"Diane Patron",           name:""},
+  {id:"18e4a6fb9",level:"C",bracket:4,player1:"Ken Cotoner",          player2:"James Duran",            name:""},
+  {id:"192d50908",level:"C",bracket:4,player1:"Lily Camat",           player2:"Jeff Orbegoso",          name:""},
+  {id:"fae1f3a79",level:"C",bracket:4,player1:"Allan Tamayo",         player2:"Cristina Trabal",        name:""},
+  {id:"60e007850",level:"C",bracket:4,player1:"Paul Esquillon",       player2:"Rose Lyn Villanueva",    name:""},
+  {id:"d171eb87e",level:"C",bracket:5,player1:"Jerald Tuliao",        player2:"Deuzette De Dios",       name:""},
+  {id:"798eb531a",level:"C",bracket:5,player1:"Oliver Cesumission",   player2:"Jameela Cruz",           name:""},
+  {id:"f90139c99",level:"C",bracket:5,player1:"Barbie Macaraeg",      player2:"Nom",                    name:""},
+  {id:"848bb2432",level:"C",bracket:5,player1:"Xena Bugayong",        player2:"Oliver Jed Balgos",      name:""},
+  {id:"aab89c666",level:"C",bracket:6,player1:"Ivan Canlas",          player2:"Charlson Tolentino",     name:""},
+  {id:"e15c61815",level:"C",bracket:6,player1:"Jeffrey Carillo",      player2:"Rex Mabeza",             name:""},
+  {id:"4d61ce3d4",level:"C",bracket:6,player1:"Bion Henrik Priolo",   player2:"Jason Andrew Naraval",   name:""},
+  {id:"73744b9f8",level:"C",bracket:6,player1:"Jeric Brioso",         player2:"RK Ocampo",              name:""},
+  {id:"28917c122",level:"C",bracket:7,player1:"Bea Cegama Santos",    player2:"Paul Benjamin Lauzon",   name:""},
+  {id:"6380ce4ac",level:"C",bracket:7,player1:"Tony Rose Dacdac",     player2:"Kean Johan Salangsang",  name:""},
+  {id:"d62c7aa16",level:"C",bracket:7,player1:"Kat Alberto",          player2:"Dominic Alberto",        name:""},
+  {id:"05e12c3e2",level:"C",bracket:7,player1:"Jay R Cabatas",        player2:"Anne Matias",            name:""},
+  {id:"2d8b34ded",level:"C",bracket:8,player1:"John Etom",            player2:"Jonathan Santelices",    name:""},
+  {id:"48f597b18",level:"C",bracket:8,player1:"Sean Paul Jimenez",    player2:"Isiah Lawrence Quitoras",name:""},
+  {id:"c2e4a08d2",level:"C",bracket:8,player1:"Arthur Reyes",         player2:"Rowie Jane Nuval",       name:""},
+  {id:"30a7ce2f5",level:"C",bracket:8,player1:"Papi",                 player2:"Aaron",                  name:""},
   // Level B – Brackets 1-3
-  {id:uid(),level:"B",bracket:1,player1:"Denver De Guzman",     player2:"Fritz Collado",          name:""},
-  {id:uid(),level:"B",bracket:1,player1:"Joshua Justo",         player2:"Cheng",                  name:""},
-  {id:uid(),level:"B",bracket:1,player1:"Rick Diaz",            player2:"Paul Lauzon",            name:""},
-  {id:uid(),level:"B",bracket:1,player1:"JayJay",               player2:"Louie",                  name:""},
-  {id:uid(),level:"B",bracket:2,player1:"Aniel Belaos",         player2:"Franz Datu",             name:""},
-  {id:uid(),level:"B",bracket:2,player1:"Ricky",                player2:"Angelo",                 name:""},
-  {id:uid(),level:"B",bracket:2,player1:"Jap Pasion",           player2:"Mckheizer Oyales",       name:""},
-  {id:uid(),level:"B",bracket:2,player1:"Mj",                   player2:"Lg",                     name:""},
-  {id:uid(),level:"B",bracket:3,player1:"Paul Esquillon",       player2:"Kean Johan Salangsang",  name:""},
-  {id:uid(),level:"B",bracket:3,player1:"Jay R Cabatas",        player2:"Rj Rayos",               name:""},
-  {id:uid(),level:"B",bracket:3,player1:"Mark Leosala",         player2:"Andrew",                 name:""},
-  {id:uid(),level:"B",bracket:3,player1:"Nick",                 player2:"Charlson",               name:""},
+  {id:"5e4bb5095",level:"B",bracket:1,player1:"Denver De Guzman",     player2:"Fritz Collado",          name:""},
+  {id:"671b4adf2",level:"B",bracket:1,player1:"Joshua Justo",         player2:"Cheng",                  name:""},
+  {id:"bada92a8e",level:"B",bracket:1,player1:"Rick Diaz",            player2:"Paul Lauzon",            name:""},
+  {id:"29d47e939",level:"B",bracket:1,player1:"JayJay",               player2:"Louie",                  name:""},
+  {id:"ecb62e772",level:"B",bracket:2,player1:"Aniel Belaos",         player2:"Franz Datu",             name:""},
+  {id:"73dac1bde",level:"B",bracket:2,player1:"Ricky",                player2:"Angelo",                 name:""},
+  {id:"03b10c3d1",level:"B",bracket:2,player1:"Jap Pasion",           player2:"Mckheizer Oyales",       name:""},
+  {id:"7e0db3309",level:"B",bracket:2,player1:"Mj",                   player2:"Lg",                     name:""},
+  {id:"daa3b37e9",level:"B",bracket:3,player1:"Paul Esquillon",       player2:"Kean Johan Salangsang",  name:""},
+  {id:"9c40c9d82",level:"B",bracket:3,player1:"Jay R Cabatas",        player2:"Rj Rayos",               name:""},
+  {id:"0019fc1bb",level:"B",bracket:3,player1:"Mark Leosala",         player2:"Andrew",                 name:""},
+  {id:"f637bec3e",level:"B",bracket:3,player1:"Nick",                 player2:"Charlson",               name:""},
 ];
 
 /* ══════════════════════════════════════════════════════
@@ -799,7 +806,7 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
     ), [schedule, filterLv, filterCt]);
 
   const lateCount = useMemo(() => schedule.filter(m=>m.endMin>END_MINUTES).length, [schedule]);
-  const doneCount = useMemo(() => schedule.filter(m=>matchStates[m.id]?.matchStatus==="done").length, [schedule, matchStates]);
+  const doneCount = useMemo(() => schedule.filter(m=>isDone(matchStates[m.id])).length, [schedule, matchStates]);
 
   const byTime = useMemo(() => {
     const map = {};
@@ -935,7 +942,7 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
         const [lvl,brk] = key.split("-");
         const lm = LEVEL_META[lvl]||LEVEL_META.E;
         const bc = BKT_COLORS[(+brk-1)%BKT_COLORS.length];
-        const done = matches.filter(m=>matchStates[m.id]?.winner).length;
+        const done = matches.filter(m=>isDone(matchStates[m.id])).length;
         return (
           <div key={key} style={{marginBottom:24}}>
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
@@ -982,7 +989,7 @@ function ResultsView({ teams, schedule, matchStates, levels, brackets }) {
           const lm = LEVEL_META[lvl]||LEVEL_META.E;
           const bc = BKT_COLORS[(+brk-1)%BKT_COLORS.length];
           const ms = getMatches(key);
-          const done = ms.filter(m=>matchStates[m.id]?.winner).length;
+          const done = ms.filter(m=>isDone(matchStates[m.id])).length;
           return (
             <button key={key} onClick={()=>setActiveKey(activeKey===key?null:key)}
               style={{background:activeKey===key?`${bc}33`:C.card,border:`2px solid ${activeKey===key?bc:C.border}`,borderRadius:10,padding:"7px 14px",cursor:"pointer",transition:"all 0.2s",boxShadow:activeKey===key?`0 2px 12px ${bc}44`:"none"}}>
@@ -1004,7 +1011,7 @@ function ResultsView({ teams, schedule, matchStates, levels, brackets }) {
         const bc = BKT_COLORS[(+brk-1)%BKT_COLORS.length];
         const matches  = getMatches(activeKey);
         const standings = computeStandings(grouped[activeKey], matches, matchStates);
-        const played   = matches.filter(m=>matchStates[m.id]?.winner).length;
+        const played   = matches.filter(m=>isDone(matchStates[m.id])).length;
 
         return (
           <div>
@@ -1156,9 +1163,9 @@ function KOMatchCard({ homeTeam, awayTeam, matchData, onUpdate, roundLabel, matc
 function KnockoutView({ teams, schedule, matchStates }) {
   const [selectedLevel, setSelectedLevel] = useState("B");
   // koFormats: { [level]: "final"|"sf"|"qf" }
-  const [koFormats, setKoFormats] = useLocalStorage("ps_koFormats", { B:"qf", C:"qf", D:"sf", E:"final" });
+  const [koFormats, setKoFormats] = useSharedState("koFormats", { B:"qf", C:"qf", D:"sf", E:"final" });
   // koData: { [level]: { [matchKey]: { homeTeam, awayTeam, scoreHome, scoreAway, winner } } }
-  const [koData, setKoData] = useLocalStorage("ps_koData", {});
+  const [koData, setKoData] = useSharedState("koData", {});
   const [showSeedModal, setShowSeedModal] = useState(false);
   const [assignTarget, setAssignTarget] = useState(null); // { key, slot }
 
@@ -1770,18 +1777,21 @@ function App() {
 
 
   // ── Shared data (loaded regardless of role) ──
-  const [teams,        setTeams]        = useLocalStorage("ps_teams", INITIAL_TEAMS);
-  const [scheduleVersion, setScheduleVersion] = useLocalStorage("ps_schedule_version", "");
-  // Clear stale schedule built by an older algorithm
-  if (scheduleVersion !== "" && scheduleVersion !== SCHEDULE_VERSION) {
-    setSchedule([]);
-    setMatchStates({});
-    setRegenCount(3);
-    setScheduleVersion(SCHEDULE_VERSION);
-  }
-  const [schedule,     setSchedule]     = useLocalStorage("ps_schedule", []);
-  const [matchStates,  setMatchStates]  = useLocalStorage("ps_matchStates", {});
-  const [regenCount,   setRegenCount]   = useLocalStorage("ps_regen_count", 3);
+  const [teams,        setTeams]        = useSharedState("teams", INITIAL_TEAMS);
+  const [scheduleVersion, setScheduleVersion] = useSharedState("scheduleVersion", "");
+  const [schedule,     setSchedule]     = useSharedState("schedule", []);
+  const [matchStates,  setMatchStates]  = useSharedState("matchStates", {});
+  const [regenCount,   setRegenCount]   = useSharedState("regenCount", 3);
+
+  // Clear stale schedule when version changes — must be AFTER all hooks
+  useEffect(() => {
+    if (scheduleVersion !== "" && scheduleVersion !== SCHEDULE_VERSION) {
+      setSchedule([]);
+      setMatchStates({});
+      setRegenCount(3);
+      setScheduleVersion(SCHEDULE_VERSION);
+    }
+  }, [scheduleVersion]);
 
   const sharedStyles = (
     <>
@@ -1841,7 +1851,7 @@ function App() {
   const addTeam    = form => { setTeams(prev => [...prev, { ...form, id:uid() }]); setModal(null); };
   const updateTeam = form => { setTeams(prev => prev.map(t => t.id===editTeam.id ? { ...form, id:t.id } : t)); setEditTeam(null); };
 
-  const doneCount = useMemo(() => schedule.filter(m=>matchStates[m.id]?.matchStatus==="done").length, [schedule, matchStates]);
+  const doneCount = useMemo(() => schedule.filter(m=>isDone(matchStates[m.id])).length, [schedule, matchStates]);
 
   return (
     <>
