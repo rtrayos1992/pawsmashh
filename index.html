@@ -124,7 +124,7 @@ function _ensureListening() {
   if (!ref) { console.error("❌ No ref — cannot listen"); return; }
   console.log("🔥 Starting onSnapshot listener...");
   _unsubscribe = ref.onSnapshot(snap => {
-    console.log("📡 Snapshot received — exists:", snap.exists, "fields:", snap.exists ? Object.keys(snap.data()) : []);
+    console.log("📡 Snapshot received — fields:", snap.exists ? Object.keys(snap.data()) : "empty");
     if (snap && snap.exists) _notify(snap.data());
   }, err => {
     console.error("❌ onSnapshot error:", err.code, err.message);
@@ -134,13 +134,9 @@ function _ensureListening() {
 async function saveField(field, value) {
   try {
     const ref = getTournamentRef();
-    if (!ref) { console.error("❌ saveField: no ref for", field); return; }
-    console.log("💾 Saving:", field);
+    if (!ref) return;
     await ref.set({ [field]: value }, { merge: true });
-    console.log("✅ Saved:", field);
-  } catch(e) {
-    console.error("❌ Save failed for", field, "—", e.code, e.message);
-  }
+  } catch(e) { console.error("❌ Save failed:", field, e.code, e.message); }
 }
 function useSharedState(field, initial) {
   const lsKey = `ps_${field}`;
@@ -981,9 +977,27 @@ function ResultsView({ teams, schedule, matchStates, levels, brackets }) {
   }, [teams, levels, brackets]);
 
   const allKeys = useMemo(() => Object.keys(grouped).sort(), [grouped]);
+
+  // Recompute whenever matchStates changes — serialize as key to force re-render
+  const matchStatesKey = useMemo(() => JSON.stringify(matchStates), [matchStates]);
+
   const getMatches = useCallback(key => schedule.filter(m=>`${m.level}-${m.bracket}`===key), [schedule]);
 
+  const activeMatches  = useMemo(() => activeKey ? getMatches(activeKey) : [], [activeKey, schedule, matchStatesKey]);
+  const activeStandings = useMemo(() =>
+    activeKey && grouped[activeKey]
+      ? computeStandings(grouped[activeKey], activeMatches, matchStates)
+      : [],
+    [activeKey, activeMatches, matchStates, matchStatesKey]);
+  const activePlayed = useMemo(() =>
+    activeMatches.filter(m => isDone(matchStates[m.id])).length,
+    [activeMatches, matchStates, matchStatesKey]);
+
   if (!schedule.length) return <EmptyState msg="Generate the schedule first, then record results in the Schedule tab."/>;
+
+  const [activeLvl, activeBrk] = activeKey ? activeKey.split("-") : [null, null];
+  const activeLm = activeLvl ? (LEVEL_META[activeLvl]||LEVEL_META.E) : null;
+  const activeBc = activeBrk ? BKT_COLORS[(+activeBrk-1)%BKT_COLORS.length] : null;
 
   return (
     <div>
@@ -1002,7 +1016,7 @@ function ResultsView({ teams, schedule, matchStates, levels, brackets }) {
                 <LevelBadge level={lvl} size={10}/>
                 <span style={{color:activeKey===key?bc:C.muted,fontWeight:700,fontSize:12}}>B{brk}</span>
               </div>
-              {ms.length>0 && <div style={{fontSize:10,color:done===ms.length?"#2ecc71":C.pink,marginTop:2,textAlign:"center"}}>{done}/{ms.length}</div>}
+              {ms.length>0 && <div style={{fontSize:10,color:done===ms.length&&ms.length>0?"#2ecc71":C.pink,marginTop:2,textAlign:"center"}}>{done}/{ms.length}</div>}
             </button>
           );
         })}
@@ -1010,83 +1024,75 @@ function ResultsView({ teams, schedule, matchStates, levels, brackets }) {
 
       {!activeKey && <EmptyState msg="Select a group above to see standings and results."/>}
 
-      {activeKey && grouped[activeKey] && (() => {
-        const [lvl,brk] = activeKey.split("-");
-        const lm = LEVEL_META[lvl]||LEVEL_META.E;
-        const bc = BKT_COLORS[(+brk-1)%BKT_COLORS.length];
-        const matches  = getMatches(activeKey);
-        const standings = computeStandings(grouped[activeKey], matches, matchStates);
-        const played   = matches.filter(m=>isDone(matchStates[m.id])).length;
-
-        return (
-          <div>
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20,flexWrap:"wrap"}}>
-              <span style={{background:lm.gradient,color:lm.text,borderRadius:7,padding:"4px 14px",fontWeight:900,fontSize:16,fontFamily:"'Fredoka One',sans-serif"}}>Level {lvl}</span>
-              <span style={{background:`${bc}33`,color:bc,border:`1px solid ${bc}66`,borderRadius:7,padding:"4px 14px",fontWeight:800,fontSize:16}}>Bracket {brk}</span>
-              <span style={{color:C.muted,fontSize:13}}>{played} of {matches.length} played</span>
-            </div>
-
-            {/* Standings table */}
-            <div style={{marginBottom:24,borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
-              <div style={{background:C.faint,padding:"10px 16px",fontFamily:"'Fredoka One',sans-serif",fontSize:14,color:C.pink,letterSpacing:1}}>📊 STANDINGS</div>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-                <thead>
-                  <tr style={{background:"rgba(233,30,140,0.05)"}}>
-                    {["#","Team","P","W","L","PF","PA","+/-"].map(h => (
-                      <th key={h} style={{padding:"8px 12px",textAlign:h==="Team"?"left":"center",color:C.muted,fontSize:11,fontWeight:700,letterSpacing:1,textTransform:"uppercase",borderBottom:`1px solid ${C.border}`}}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {standings.map((s,i) => {
-                    const diff = s.pf - s.pa;
-                    return (
-                      <tr key={s.team.id} style={{background:i%2===0?"rgba(233,30,140,0.03)":"transparent",borderBottom:`1px solid ${C.faint}`}}>
-                        <td style={{padding:"10px 12px",textAlign:"center",color:i===0?C.pink:i===1?"#f472b6":C.muted,fontWeight:i<2?800:400,fontSize:i===0?16:13}}>{i===0?"🏆":i===1?"🥈":i+1}</td>
-                        <td style={{padding:"10px 12px",color:i===0?C.white:"#ccc",fontWeight:i===0?700:400}}>{i===0?"🐾 ":""}{s.team.player1} & {s.team.player2}</td>
-                        <td style={{padding:"10px 12px",textAlign:"center",color:C.muted}}>{s.played}</td>
-                        <td style={{padding:"10px 12px",textAlign:"center",color:s.wins>0?"#2ecc71":C.muted,fontWeight:s.wins>0?700:400}}>{s.wins}</td>
-                        <td style={{padding:"10px 12px",textAlign:"center",color:s.losses>0?"#e74c3c":C.muted}}>{s.losses}</td>
-                        <td style={{padding:"10px 12px",textAlign:"center",color:C.muted}}>{s.pf}</td>
-                        <td style={{padding:"10px 12px",textAlign:"center",color:C.muted}}>{s.pa}</td>
-                        <td style={{padding:"10px 12px",textAlign:"center",color:diff>0?C.pink:diff<0?"#e74c3c":C.muted,fontWeight:diff!==0?700:400}}>{diff>0?"+":""}{diff}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Match result list */}
-            <div style={{borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
-              <div style={{background:C.faint,padding:"10px 16px",fontFamily:"'Fredoka One',sans-serif",fontSize:14,color:C.pink,letterSpacing:1}}>🏸 MATCH RESULTS</div>
-              {matches.length===0 && <div style={{padding:"20px 16px",color:C.muted,fontSize:13}}>No matches scheduled for this group.</div>}
-              {matches.map((m,idx) => {
-                const s = matchStates[m.id] || {};
-                const has = !!s.winner;
-                const cc = COURT_COLORS[(m.court-1)%COURT_COLORS.length];
-                return (
-                  <div key={m.id} style={{padding:"12px 16px",borderBottom:idx<matches.length-1?`1px solid ${C.faint}`:"none",background:has?"rgba(233,30,140,0.04)":"transparent",display:"flex",flexWrap:"wrap",alignItems:"center",gap:10}}>
-                    <div style={{display:"flex",gap:6,flexShrink:0}}>
-                      <span style={{background:`${cc}22`,color:cc,border:`1px solid ${cc}44`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>C{m.court}</span>
-                      <span style={{color:C.muted,fontSize:11,alignSelf:"center"}}>{minutesToTime(m.startMin)}</span>
-                    </div>
-                    <div style={{flex:1,minWidth:160,display:"flex",flexWrap:"wrap",alignItems:"center",gap:6}}>
-                      <span style={{color:s.winner==="home"?C.pink:C.white,fontWeight:s.winner==="home"?700:400,fontSize:13}}>{s.winner==="home"&&"🏆 "}{m.home.player1} & {m.home.player2}</span>
-                      {has && <span style={{background:`${C.pink}22`,border:`1px solid ${C.pink}44`,borderRadius:7,padding:"2px 12px",color:C.white,fontWeight:900,fontSize:16,fontFamily:"'Fredoka One',sans-serif"}}>{s.scoreHome||0} — {s.scoreAway||0}</span>}
-                      <span style={{color:s.winner==="away"?C.pink:C.white,fontWeight:s.winner==="away"?700:400,fontSize:13}}>{s.winner==="away"&&"🏆 "}{m.away.player1} & {m.away.player2}</span>
-                    </div>
-                    {!has && <span style={{color:C.muted,fontSize:11,marginLeft:"auto"}}>Not yet played</span>}
-                  </div>
-                );
-              })}
-            </div>
+      {activeKey && grouped[activeKey] && (
+        <div>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20,flexWrap:"wrap"}}>
+            <span style={{background:activeLm.gradient,color:activeLm.text,borderRadius:7,padding:"4px 14px",fontWeight:900,fontSize:16,fontFamily:"'Fredoka One',sans-serif"}}>Level {activeLvl}</span>
+            <span style={{background:`${activeBc}33`,color:activeBc,border:`1px solid ${activeBc}66`,borderRadius:7,padding:"4px 14px",fontWeight:800,fontSize:16}}>Bracket {activeBrk}</span>
+            <span style={{color:C.muted,fontSize:13}}>{activePlayed} of {activeMatches.length} played</span>
           </div>
-        );
-      })()}
-    </div>
-  );
-}
+
+          {/* Standings table */}
+          <div style={{marginBottom:24,borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
+            <div style={{background:C.faint,padding:"10px 16px",fontFamily:"'Fredoka One',sans-serif",fontSize:14,color:C.pink,letterSpacing:1}}>📊 STANDINGS</div>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+              <thead>
+                <tr style={{background:"rgba(233,30,140,0.05)"}}>
+                  {["#","Team","P","W","L","PF","PA","+/-"].map(h => (
+                    <th key={h} style={{padding:"8px 12px",textAlign:h==="Team"?"left":"center",color:C.muted,fontSize:11,fontWeight:700,letterSpacing:1,textTransform:"uppercase",borderBottom:`1px solid ${C.border}`}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {activeStandings.map((s,i) => {
+                  const diff = s.pf - s.pa;
+                  return (
+                    <tr key={s.team.id} style={{background:i%2===0?"rgba(233,30,140,0.03)":"transparent",borderBottom:`1px solid ${C.faint}`}}>
+                      <td style={{padding:"10px 12px",textAlign:"center",color:i===0?C.pink:i===1?"#f472b6":C.muted,fontWeight:i<2?800:400,fontSize:i===0?16:13}}>{i===0?"🏆":i===1?"🥈":i+1}</td>
+                      <td style={{padding:"10px 12px",color:i===0?C.white:"#ccc",fontWeight:i===0?700:400}}>{i===0?"🐾 ":""}{s.team.player1} & {s.team.player2}</td>
+                      <td style={{padding:"10px 12px",textAlign:"center",color:C.muted}}>{s.played}</td>
+                      <td style={{padding:"10px 12px",textAlign:"center",color:s.wins>0?"#2ecc71":C.muted,fontWeight:s.wins>0?700:400}}>{s.wins}</td>
+                      <td style={{padding:"10px 12px",textAlign:"center",color:s.losses>0?"#e74c3c":C.muted}}>{s.losses}</td>
+                      <td style={{padding:"10px 12px",textAlign:"center",color:C.muted}}>{s.pf}</td>
+                      <td style={{padding:"10px 12px",textAlign:"center",color:C.muted}}>{s.pa}</td>
+                      <td style={{padding:"10px 12px",textAlign:"center",color:diff>0?C.pink:diff<0?"#e74c3c":C.muted,fontWeight:diff!==0?700:400}}>{diff>0?"+":""}{diff}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Match result list */}
+          <div style={{borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
+            <div style={{background:C.faint,padding:"10px 16px",fontFamily:"'Fredoka One',sans-serif",fontSize:14,color:C.pink,letterSpacing:1}}>🏸 MATCH RESULTS</div>
+            {activeMatches.length===0 && <div style={{padding:"20px 16px",color:C.muted,fontSize:13}}>No matches scheduled for this group.</div>}
+            {activeMatches.map((m,idx) => {
+              const s = matchStates[m.id] || {};
+              const status = s.matchStatus || "pending";
+              const hasWinner = !!s.winner;
+              const done = isDone(s);
+              const cc = COURT_COLORS[(m.court-1)%COURT_COLORS.length];
+              const statusColor = status==="ongoing" ? C.pink : status==="done" ? "#2ecc71" : C.muted;
+              const statusLabel = status==="ongoing" ? "🔴 Ongoing" : status==="done" ? "✅ Done" : "⏳ Pending";
+              return (
+                <div key={m.id} style={{padding:"12px 16px",borderBottom:idx<activeMatches.length-1?`1px solid ${C.faint}`:"none",background:done?"rgba(233,30,140,0.04)":"transparent",display:"flex",flexWrap:"wrap",alignItems:"center",gap:10}}>
+                  <div style={{display:"flex",gap:6,flexShrink:0}}>
+                    <span style={{background:`${cc}22`,color:cc,border:`1px solid ${cc}44`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>C{m.court}</span>
+                    <span style={{color:C.muted,fontSize:11,alignSelf:"center"}}>{minutesToTime(m.startMin)}</span>
+                  </div>
+                  <div style={{flex:1,minWidth:160,display:"flex",flexWrap:"wrap",alignItems:"center",gap:6}}>
+                    <span style={{color:s.winner==="home"?C.pink:C.white,fontWeight:s.winner==="home"?700:400,fontSize:13}}>{s.winner==="home"&&"🏆 "}{m.home.player1} & {m.home.player2}</span>
+                    {(s.scoreHome||s.scoreAway) && done && (
+                      <span style={{background:`${C.pink}22`,border:`1px solid ${C.pink}44`,borderRadius:7,padding:"2px 12px",color:C.white,fontWeight:900,fontSize:16,fontFamily:"'Fredoka One',sans-serif"}}>{s.scoreHome||0} — {s.scoreAway||0}</span>
+                    )}
+                    <span style={{color:s.winner==="away"?C.pink:C.white,fontWeight:s.winner==="away"?700:400,fontSize:13}}>{s.winner==="away"&&"🏆 "}{m.away.player1} & {m.away.player2}</span>
+                  </div>
+                  <span style={{color:statusColor,fontSize:11,fontWeight:600,marginLeft:"auto",flexShrink:0}}>{statusLabel}</span>
+                </div>
+              );
+            })}
+          </div>
 
 /* ══════════════════════════════════════════════════════
    KNOCKOUT VIEW
@@ -1777,17 +1783,45 @@ const TABS = [
 ];
 
 function App() {
-  // ── Role: null = login screen, "admin" = full access, "player" = read-only ──
-  const [role,    setRole]    = useLocalStorage("ps_role", null);
+  // ── URL param role — read synchronously before any state ──
+  const urlRole = (() => {
+    try {
+      const p = new URLSearchParams(window.location.search).get("role");
+      return p === "player" ? "player" : p === "admin" ? "admin" : null;
+    } catch { return null; }
+  })();
 
+  // ── Role state — URL param always wins over localStorage ──
+  const [role, _setRole] = useState(() => {
+    if (urlRole) {
+      try { localStorage.setItem("ps_role", JSON.stringify(urlRole)); } catch {}
+      return urlRole;
+    }
+    try { const s = localStorage.getItem("ps_role"); return s ? JSON.parse(s) : null; }
+    catch { return null; }
+  });
+  const setRole = (r) => {
+    // If URL forces a role, only allow exiting (null) not switching to another role
+    if (urlRole && r !== null) return;
+    try { localStorage.setItem("ps_role", JSON.stringify(r)); } catch {}
+    _setRole(r);
+  };
 
-  // ── Shared data (loaded regardless of role) ──
-  const [teams,        setTeams]        = useSharedState("teams", INITIAL_TEAMS);
+  // ── ALL hooks must be here before any conditional returns ──
+  const [tab,        setTab]        = useState("schedule");
+  const [levels,     setLevels]     = useState(["B","C","D","E"]);
+  const [brackets,   setBrackets]   = useState([1,2,3,4,5,6,7,8]);
+  const [modal,      setModal]      = useState(null);
+  const [editTeam,   setEditTeam]   = useState(null);
+  const [adminPin,   setAdminPin]   = useLocalStorage(ADMIN_PIN_KEY, DEFAULT_PIN);
+
+  // ── Shared Firebase data ──
+  const [teams,           setTeams]           = useSharedState("teams", INITIAL_TEAMS);
   const [scheduleVersion, setScheduleVersion] = useSharedState("scheduleVersion", "");
-  const [schedule,     setSchedule]     = useSharedState("schedule", []);
-  const [matchStates,  setMatchStates]  = useSharedState("matchStates", {});
+  const [schedule,        setSchedule]        = useSharedState("schedule", []);
+  const [matchStates,     setMatchStates]      = useSharedState("matchStates", {});
 
-  // Clear stale schedule when version changes — must be AFTER all hooks
+  // ── Clear stale schedule on version mismatch ──
   useEffect(() => {
     if (scheduleVersion !== "" && scheduleVersion !== SCHEDULE_VERSION) {
       setSchedule([]);
@@ -1796,23 +1830,44 @@ function App() {
     }
   }, [scheduleVersion]);
 
-  const sharedStyles = (
+  // ── If URL forces a role but state drifted, correct it ──
+  useEffect(() => {
+    if (urlRole && role !== urlRole) _setRole(urlRole);
+  }, []);
+
+  const updateMatchState = useCallback((id, update) =>
+    setMatchStates(prev => ({ ...prev, [id]: { ...prev[id], ...update } })), []);
+
+  const addTeam    = useCallback(form => { setTeams(prev => [...prev, { ...form, id:uid() }]); setModal(null); }, []);
+  const updateTeam = useCallback(form => { setTeams(prev => prev.map(t => t.id===editTeam?.id ? { ...form, id:t.id } : t)); setEditTeam(null); }, [editTeam]);
+
+  const doneCount = useMemo(() => schedule.filter(m=>isDone(matchStates[m.id])).length, [schedule, matchStates]);
+
+  // ── Shared styles ──
+  const globalStyles = (
     <>
       <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=DM+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
-      <style>{`*, *::before, *::after { box-sizing: border-box; } select, select option { background: #2a1520 !important; color: #fff !important; } select { color-scheme: dark; }`}</style>
+      <style>{`
+        *, *::before, *::after { box-sizing: border-box; }
+        select, select option { background: #2a1520 !important; color: #fff !important; }
+        select { color-scheme: dark; }
+        input[type=number]::-webkit-inner-spin-button { opacity: 0.4; }
+      `}</style>
     </>
   );
 
-  // ── Show login screen if no role ──
+  // ── LOGIN ──
   if (!role) return (
-    <>{sharedStyles}<LoginScreen onLogin={setRole}/></>
+    <>{globalStyles}<LoginScreen onLogin={r => {
+      try { localStorage.setItem("ps_role", JSON.stringify(r)); } catch {}
+      _setRole(r);
+    }}/></>
   );
 
-  // ── Player view: schedule only, read-only ──
+  // ── PLAYER VIEW ──
   if (role === "player") return (
     <>
-      <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=DM+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
-      <style>{`*, *::before, *::after { box-sizing: border-box; } select, select option { background: #2a1520 !important; color: #fff !important; } select { color-scheme: dark; }`}</style>
+      {globalStyles}
       <div style={{minHeight:"100vh",background:C.bg,color:C.white,fontFamily:"'DM Sans',sans-serif",position:"relative",paddingBottom:60}}>
         <PawBg/>
         <div style={{position:"relative",zIndex:1}}>
@@ -1824,10 +1879,12 @@ function App() {
                   <div style={{background:`${C.pink}22`,border:`1px solid ${C.pink}44`,borderRadius:8,padding:"4px 12px",color:C.pink,fontSize:11,fontWeight:700,letterSpacing:1}}>
                     🏸 PLAYER VIEW
                   </div>
-                  <button onClick={()=>setRole(null)}
-                    style={{background:"none",border:`1px solid ${C.border}`,borderRadius:8,padding:"4px 12px",color:C.muted,fontSize:11,cursor:"pointer"}}>
-                    ← Exit
-                  </button>
+                  {!urlRole && (
+                    <button onClick={()=>setRole(null)}
+                      style={{background:"none",border:`1px solid ${C.border}`,borderRadius:8,padding:"4px 12px",color:C.muted,fontSize:11,cursor:"pointer"}}>
+                      ← Exit
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1840,32 +1897,10 @@ function App() {
     </>
   );
 
-  // ── Admin view: full access ──
-  const [tab,          setTab]          = useState("schedule");
-  const [levels,       setLevels]       = useState(["B","C","D","E"]);
-  const [brackets,     setBrackets]     = useState([1,2,3,4,5,6,7,8]);
-  const [modal,        setModal]        = useState(null);
-  const [editTeam,     setEditTeam]     = useState(null);
-  const [adminPin,     setAdminPin]     = useLocalStorage(ADMIN_PIN_KEY, DEFAULT_PIN);
-
-  const updateMatchState = useCallback((id, update) =>
-    setMatchStates(prev => ({ ...prev, [id]: { ...prev[id], ...update } })), []);
-
-  const addTeam    = form => { setTeams(prev => [...prev, { ...form, id:uid() }]); setModal(null); };
-  const updateTeam = form => { setTeams(prev => prev.map(t => t.id===editTeam.id ? { ...form, id:t.id } : t)); setEditTeam(null); };
-
-  const doneCount = useMemo(() => schedule.filter(m=>isDone(matchStates[m.id])).length, [schedule, matchStates]);
-
+  // ── ADMIN VIEW ──
   return (
     <>
-      <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=DM+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
-      <style>{`
-        *, *::before, *::after { box-sizing: border-box; }
-        select, select option   { background: #2a1520 !important; color: #fff !important; }
-        select                  { color-scheme: dark; }
-        input[type=number]::-webkit-inner-spin-button { opacity: 0.4; }
-      `}</style>
-
+      {globalStyles}
       <div style={{minHeight:"100vh",background:C.bg,color:C.white,fontFamily:"'DM Sans',sans-serif",position:"relative",paddingBottom:60}}>
         <PawBg/>
         <div style={{position:"relative",zIndex:1}}>
@@ -1887,11 +1922,12 @@ function App() {
                     </div>
                   ))}
                   <div style={{background:"rgba(233,30,140,0.15)",border:`1px solid ${C.pink}44`,borderRadius:8,padding:"4px 10px",color:C.pink,fontSize:10,fontWeight:700,letterSpacing:1}}>🛡️ ADMIN</div>
-
-                  <button onClick={()=>setRole(null)} title="Sign out"
-                    style={{background:"rgba(231,76,60,0.1)",border:"1px solid rgba(231,76,60,0.3)",borderRadius:8,padding:"6px 12px",color:"#e74c3c",fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                    🚪 Exit
-                  </button>
+                  {!urlRole && (
+                    <button onClick={()=>setRole(null)} title="Sign out"
+                      style={{background:"rgba(231,76,60,0.1)",border:"1px solid rgba(231,76,60,0.3)",borderRadius:8,padding:"6px 12px",color:"#e74c3c",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                      🚪 Exit
+                    </button>
+                  )}
                 </div>
               </div>
               <div style={{height:1,background:`linear-gradient(90deg,transparent,${C.pink}66,transparent)`}}/>
@@ -1920,16 +1956,8 @@ function App() {
       </div>
 
       {/* ── Modals ── */}
-      {modal==="add" && (
-        <Modal title="🐾 Add Doubles Team" onClose={()=>setModal(null)}>
-          <TeamForm onSave={addTeam} onCancel={()=>setModal(null)} levels={levels} brackets={brackets}/>
-        </Modal>
-      )}
-      {editTeam && (
-        <Modal title="✎ Edit Team" onClose={()=>setEditTeam(null)}>
-          <TeamForm initial={editTeam} onSave={updateTeam} onCancel={()=>setEditTeam(null)} levels={levels} brackets={brackets}/>
-        </Modal>
-      )}
+      {modal==="addTeam"  && <Modal title="Add Pair"  onClose={()=>setModal(null)}><TeamForm initial={{level:"C",bracket:1,player1:"",player2:"",name:""}} onSave={addTeam}  onCancel={()=>setModal(null)} levels={levels} brackets={brackets}/></Modal>}
+      {editTeam           && <Modal title="Edit Pair" onClose={()=>setEditTeam(null)}><TeamForm initial={editTeam} onSave={updateTeam} onCancel={()=>setEditTeam(null)} levels={levels} brackets={brackets}/></Modal>}
     </>
   );
 }
