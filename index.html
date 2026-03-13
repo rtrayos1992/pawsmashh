@@ -41,6 +41,25 @@
   <script type="text/babel" data-presets="react">
     const { useState, useMemo, useCallback, useEffect } = React;
 
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e) { return { error: e }; }
+  render() {
+    if (this.state.error) return (
+      <div style={{background:"#1a0a0e",color:"#e74c3c",padding:32,fontFamily:"monospace",fontSize:13,minHeight:"100vh"}}>
+        <div style={{fontSize:24,marginBottom:16}}>💥 App crashed</div>
+        <div style={{marginBottom:8,color:"#fff"}}>{this.state.error.message}</div>
+        <pre style={{color:"#f472b6",fontSize:11,whiteSpace:"pre-wrap"}}>{this.state.error.stack}</pre>
+        <button onClick={()=>{ localStorage.clear(); location.reload(); }}
+          style={{marginTop:20,padding:"10px 20px",background:"#e74c3c",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontSize:14}}>
+          🗑️ Clear all data & reload
+        </button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
 
 /* ══════════════════════════════════════════════════════
    THEME & CONSTANTS
@@ -80,7 +99,7 @@ function minutesToTime(m) {
 function uid() { return Math.random().toString(36).substr(2,9); }
 
 // Bump this whenever the schedule algorithm changes — clears stale localStorage
-const SCHEDULE_VERSION = "v5";
+const SCHEDULE_VERSION = "v6";
 
 // ── localStorage (device-local only: role, PIN, firebase config) ──────
 function useLocalStorage(key, initial) {
@@ -922,9 +941,9 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
 
   // Merge live KO team names from koData into KO placeholder matches
   const scheduleWithKO = useMemo(() => schedule.map(m => {
-    if (!m.isKO) return m;
-    const lvData = koData[m.level] || {};
-    const koKey  = `${m.level}_${m.koRound}`;
+    if (!m || !m.isKO) return m;
+    const lvData = (koData && koData[m.level]) || {};
+    const koKey  = `${m.level}_${m.koRound || ""}`;
     const slot   = lvData[koKey] || {};
     const homeName = slot.homeTeam || "TBA";
     const awayName = slot.awayTeam || "TBA";
@@ -1832,9 +1851,9 @@ function PlayerView({ schedule, matchStates, koData={} }) {
 
   // Inject live KO team names same as ScheduleView
   const scheduleWithKO = useMemo(() => schedule.map(m => {
-    if (!m.isKO) return m;
-    const lvData = koData[m.level] || {};
-    const koKey  = `${m.level}_${m.koRound}`;
+    if (!m || !m.isKO) return m;
+    const lvData = (koData && koData[m.level]) || {};
+    const koKey  = `${m.level}_${m.koRound || ""}`;
     const slot   = lvData[koKey] || {};
     const homeName = slot.homeTeam || "TBA";
     const awayName = slot.awayTeam || "TBA";
@@ -2041,7 +2060,18 @@ function App() {
   // ── Shared Firebase data ──
   const [teams,           setTeams]           = useSharedState("teams", INITIAL_TEAMS);
   const [scheduleVersion, setScheduleVersion] = useSharedState("scheduleVersion", "");
-  const [schedule,        setSchedule]        = useSharedState("schedule", []);
+  // If stored schedule is from an old version, start fresh immediately (before first render)
+  const [schedule,        setSchedule]        = useSharedState("schedule",
+    (() => {
+      try {
+        const sv = localStorage.getItem("ps_scheduleVersion");
+        const ver = sv ? JSON.parse(sv) : "";
+        if (ver !== SCHEDULE_VERSION) return [];
+        const s = localStorage.getItem("ps_schedule");
+        return s ? JSON.parse(s) : [];
+      } catch { return []; }
+    })()
+  );
   const [matchStates,     setMatchStates]      = useSharedState("matchStates", {});
   const [koData,          setKoData]          = useSharedState("koData", {});
   const [koFormats,       setKoFormats]       = useSharedState("koFormats", { B:"sf", C:"qf", D:"sf", E:"sf" });
@@ -2187,7 +2217,9 @@ function App() {
   );
 }
 
-    ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+    ReactDOM.createRoot(document.getElementById("root")).render(
+  React.createElement(ErrorBoundary, null, React.createElement(App))
+);
   </script>
 </body>
 </html>
