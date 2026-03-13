@@ -260,15 +260,30 @@ function buildSchedule(teams) {
   }
 
   // ── Step 3: schedule all levels sharing ONE playerFree map ─────────
-  // This is the key fix: cross-level players (e.g. someone in both B & C)
-  // will have their rest enforced even across different court assignments.
+  // Level B starts only after ALL of E, D, C are fully done.
   const playerFree = {};
   ["E","D","C"].forEach(lv => {
     const keys = Object.keys(groups).filter(k => k.startsWith(lv));
     if (keys.length) assignWithRest(interleave(keys), LEVEL_COURTS[lv], playerFree);
   });
+
+  // Find when the last E/D/C match ends — Level B cannot start before that
+  const lastEDCEnd = out.length
+    ? Math.max(...out.map(m => m.endMin))
+    : START_MINUTES;
+
+  // Push all playerFree times forward to lastEDCEnd so Level B
+  // won't be scheduled into any court slot before E/D/C finish
   const bKeys = Object.keys(groups).filter(k => k.startsWith("B"));
-  if (bKeys.length) assignWithRest(interleave(bKeys), [1,2,3,4,5,6,7], playerFree);
+  if (bKeys.length) {
+    // Reset court availability to lastEDCEnd for Level B scheduling
+    const bPlayerFree = {};
+    // Carry over cross-level player rest times (in case B players also played in C etc.)
+    Object.keys(playerFree).forEach(k => {
+      bPlayerFree[k] = Math.max(playerFree[k] || START_MINUTES, lastEDCEnd);
+    });
+    assignWithRest(interleave(bKeys), [1,2,3,4,5,6,7], bPlayerFree);
+  }
 
   return out;
 }
@@ -1555,7 +1570,7 @@ function SettingsView({ levels, setLevels, brackets, setBrackets, adminPin, setA
    role: null (not logged in) | "admin" | "player"
 ══════════════════════════════════════════════════════ */
 const ADMIN_PIN_KEY = "ps_admin_pin";
-const DEFAULT_PIN   = "1234";
+const DEFAULT_PIN   = "03142026";
 
 function LoginScreen({ onLogin }) {
   const [pin, setPin]       = useState("");
