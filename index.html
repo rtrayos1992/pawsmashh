@@ -1198,7 +1198,8 @@ function KnockoutView({ teams, schedule, matchStates }) {
   const [koFormats, setKoFormats] = useSharedState("koFormats", { B:"qf", C:"qf", D:"sf", E:"final" });
   // koData: { [level]: { [matchKey]: { homeTeam, awayTeam, scoreHome, scoreAway, winner } } }
   const [koData, setKoData] = useSharedState("koData", {});
-  const [showSeedModal, setShowSeedModal] = useState(false);
+  const [showSeedModal,  setShowSeedModal]  = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
   const [assignTarget, setAssignTarget] = useState(null); // { key, slot }
 
   const format = koFormats[selectedLevel] || "final";
@@ -1377,8 +1378,12 @@ function KnockoutView({ teams, schedule, matchStates }) {
       )}
 
       {/* Actions */}
-      <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap",alignItems:"center"}}>
+      <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap",alignItems:"center"}}> 
         <button onClick={()=>setShowSeedModal(true)} style={primaryBtn}>🌱 Auto-Seed from RR Standings</button>
+        <button onClick={()=>setShowResetModal(true)}
+          style={{background:"rgba(231,76,60,0.1)",border:"1px solid rgba(231,76,60,0.35)",borderRadius:10,padding:"10px 18px",color:"#e74c3c",fontWeight:700,cursor:"pointer",fontSize:13,fontFamily:"'Fredoka One',sans-serif",letterSpacing:0.5}}>
+          🗑️ Reset Bracket
+        </button>
         <span style={{color:C.muted,fontSize:12}}>Teams can also be assigned manually on each match card below</span>
       </div>
 
@@ -1410,6 +1415,24 @@ function KnockoutView({ teams, schedule, matchStates }) {
           <div style={{display:"flex",gap:10}}>
             <button onClick={seedFromRR} style={primaryBtn}>🌱 Seed Now</button>
             <button onClick={()=>setShowSeedModal(false)} style={secondaryBtn}>Cancel</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Reset Modal */}
+      {showResetModal && (
+        <Modal title="🗑️ Reset Knockout Bracket" onClose={()=>setShowResetModal(false)}>
+          <p style={{color:C.muted,fontSize:13,margin:"0 0 20px"}}>
+            This will clear <strong style={{color:"#e74c3c"}}>all teams, scores and results</strong> from the <strong style={{color:C.white}}>Level {selectedLevel}</strong> knockout bracket. RR standings are not affected.
+          </p>
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={()=>{
+              setKoData(prev => ({ ...prev, [selectedLevel]: {} }));
+              setShowResetModal(false);
+            }} style={{...primaryBtn,background:"linear-gradient(135deg,#e74c3c,#c0392b)",boxShadow:"0 4px 20px #e74c3c55"}}>
+              🗑️ Yes, Reset Level {selectedLevel}
+            </button>
+            <button onClick={()=>setShowResetModal(false)} style={secondaryBtn}>Cancel</button>
           </div>
         </Modal>
       )}
@@ -1532,7 +1555,7 @@ function SettingsView({ levels, setLevels, brackets, setBrackets, adminPin, setA
    role: null (not logged in) | "admin" | "player"
 ══════════════════════════════════════════════════════ */
 const ADMIN_PIN_KEY = "ps_admin_pin";
-const DEFAULT_PIN   = "03142026";
+const DEFAULT_PIN   = "1234";
 
 function LoginScreen({ onLogin }) {
   const [pin, setPin]       = useState("");
