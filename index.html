@@ -374,8 +374,9 @@ function isDone(s) {
 }
 
 function computeStandings(teams, matches, matchStates) {
+  const rrMatches = matches.filter(m => !m.isKO); // exclude KO placeholders
   return [...teams].map(t => {
-    const games  = matches.filter(m => m.home.id===t.id || m.away.id===t.id);
+    const games  = rrMatches.filter(m => m.home.id===t.id || m.away.id===t.id);
     const played = games.filter(m => isDone(matchStates[m.id])).length;
     const wins   = games.filter(m => {
       const s = matchStates[m.id];
@@ -598,7 +599,8 @@ function LevelBadge({ level, size=11 }) {
   return <span style={{background:lm.gradient,color:lm.text,borderRadius:5,padding:`1px ${size-2}px`,fontSize:size,fontWeight:800,fontFamily:"'Fredoka One',sans-serif",letterSpacing:1,flexShrink:0}}>{level}</span>;
 }
 function BktBadge({ bracket, size=11 }) {
-  const bc = BKT_COLORS[(bracket-1)%BKT_COLORS.length];
+  const idx = ((bracket-1) % BKT_COLORS.length + BKT_COLORS.length) % BKT_COLORS.length;
+  const bc = BKT_COLORS[idx] || C.pink;
   return <span style={{background:`${bc}33`,color:bc,border:`1px solid ${bc}66`,borderRadius:5,padding:`1px ${size-2}px`,fontSize:size,fontWeight:700,flexShrink:0}}>B{bracket}</span>;
 }
 
@@ -939,8 +941,9 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
       (filterCt==="ALL" || m.court===Number(filterCt))
     ), [scheduleWithKO, filterLv, filterCt]);
 
-  const lateCount = useMemo(() => schedule.filter(m=>m.endMin>END_MINUTES).length, [schedule]);
-  const doneCount = useMemo(() => schedule.filter(m=>isDone(matchStates[m.id])).length, [schedule, matchStates]);
+  const rrSchedule = useMemo(() => schedule.filter(m=>!m.isKO), [schedule]);
+  const lateCount = useMemo(() => rrSchedule.filter(m=>m.endMin>END_MINUTES).length, [rrSchedule]);
+  const doneCount = useMemo(() => rrSchedule.filter(m=>isDone(matchStates[m.id])).length, [rrSchedule, matchStates]);
 
   const byTime = useMemo(() => {
     const map = {};
@@ -963,7 +966,10 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
 
   const byGroup = useMemo(() => {
     const map = {};
-    filtered.forEach(m => { const k=`${m.level}-${m.bracket}`; if (!map[k]) map[k]=[]; map[k].push(m); });
+    filtered.forEach(m => {
+      if (m.isKO) return; // KO matches shown in timeline only, not By Group
+      const k=`${m.level}-${m.bracket}`; if (!map[k]) map[k]=[]; map[k].push(m);
+    });
     return map;
   }, [filtered]);
 
@@ -995,7 +1001,7 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
       {/* Stats bar */}
       <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:20}}>
         {[
-          {n:schedule.length, label:"Total",     color:C.pink},
+          {n:rrSchedule.length, label:"Total (RR)", color:C.pink},
           {n:doneCount,        label:"Done",      color:"#2ecc71"},
           {n:lateCount,        label:"After 10PM",color:lateCount>0?"#e74c3c":C.muted},
         ].map(({n,label,color}) => (
@@ -1093,7 +1099,7 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
       {viewMode==="group" && Object.entries(byGroup).sort(([a],[b])=>a.localeCompare(b)).map(([key,matches]) => {
         const [lvl,brk] = key.split("-");
         const lm = LEVEL_META[lvl]||LEVEL_META.E;
-        const bc = BKT_COLORS[(+brk-1)%BKT_COLORS.length];
+        const bc = BKT_COLORS[((+brk-1)%BKT_COLORS.length+BKT_COLORS.length)%BKT_COLORS.length];
         const done = matches.filter(m=>isDone(matchStates[m.id])).length;
         return (
           <div key={key} style={{marginBottom:24}}>
@@ -1157,7 +1163,7 @@ function ResultsView({ teams, schedule, matchStates, levels, brackets }) {
         {allKeys.map(key => {
           const [lvl,brk] = key.split("-");
           const lm = LEVEL_META[lvl]||LEVEL_META.E;
-          const bc = BKT_COLORS[(+brk-1)%BKT_COLORS.length];
+          const bc = BKT_COLORS[((+brk-1)%BKT_COLORS.length+BKT_COLORS.length)%BKT_COLORS.length];
           const ms = getMatches(key);
           const done = ms.filter(m=>isDone(matchStates[m.id])).length;
           return (
@@ -2133,7 +2139,7 @@ function App() {
                   {[
                     {n:teams.length,    label:"PAIRS",   color:C.pink},
                     {n:doneCount,       label:"DONE",    color:"#2ecc71"},
-                    {n:schedule.length, label:"MATCHES", color:"#f472b6"},
+                    {n:schedule.filter(m=>!m.isKO).length, label:"MATCHES", color:"#f472b6"},
                   ].map(({n,label,color}) => (
                     <div key={label} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"6px 14px",textAlign:"center"}}>
                       <div style={{fontFamily:"'Fredoka One',sans-serif",fontSize:22,color,lineHeight:1}}>{n}</div>
