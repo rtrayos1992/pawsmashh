@@ -312,83 +312,105 @@ function computeStandings(teams, matches, matchStates) {
    INITIAL TEAMS DATA
 ══════════════════════════════════════════════════════ */
 const INITIAL_TEAMS = [
-  // Level E – Bracket 1
-  {id:"6b48c057c",level:"E",bracket:1,player1:"Jenn Danganan",       player2:"Kathreen Ydel",          name:""},
-  {id:"13a643c0c",level:"E",bracket:1,player1:"Patricia Luta",        player2:"Ceferino Luta 3",        name:""},
-  {id:"3f6c7372a",level:"E",bracket:1,player1:"Xian Carlo Bangate",   player2:"Xyrille",                name:""},
-  {id:"e62d3796e",level:"E",bracket:1,player1:"Ruth Partida",         player2:"Mark Marasigan",         name:""},
-  {id:"b753880a4",level:"E",bracket:1,player1:"Jessie De Guzman",     player2:"Shiena Hernandez",       name:""},
-  // Level E – Bracket 2
-  {id:"39c96e04f",level:"E",bracket:2,player1:"Jason Cansino",        player2:"Kaye Cansino",           name:""},
-  {id:"3a112ba1b",level:"E",bracket:2,player1:"Robin Vicente",        player2:"Ram Mendoza",            name:""},
-  {id:"ba34b5e83",level:"E",bracket:2,player1:"Kalvin Dacusin",       player2:"Paul Anatalio",          name:""},
-  {id:"77de380a0",level:"E",bracket:2,player1:"Apollo",               player2:"Cousin",                 name:""},
-  // Level D – Bracket 1
-  {id:"857dc954c",level:"D",bracket:1,player1:"Ralph Lopez",          player2:"Rick Diaz",              name:""},
-  {id:"0ad5562eb",level:"D",bracket:1,player1:"Calbert",              player2:"Kiel Mabeza",            name:""},
-  {id:"edc7e6371",level:"D",bracket:1,player1:"Matthew Mirallosa",    player2:"Venice Mariel Develos",  name:""},
-  {id:"4c46c9385",level:"D",bracket:1,player1:"Anthony Longasa",      player2:"Joshua Sandova",         name:""},
-  // Level D – Bracket 2
-  {id:"dca438d18",level:"D",bracket:2,player1:"Jaymi Chow",           player2:"Juramer Itlanas",        name:""},
-  {id:"9b1460ebd",level:"D",bracket:2,player1:"Ariadne Denzon",       player2:"Arlene Denzon",          name:""},
-  {id:"936d1582f",level:"D",bracket:2,player1:"Franjet",              player2:"Thea",                   name:""},
-  {id:"cb1b3cf1c",level:"D",bracket:2,player1:"Jean Lee",             player2:"Mike Arevalo",           name:""},
-  // Level D – Bracket 3
-  {id:"8b41549f6",level:"D",bracket:3,player1:"Mimoy De Jesus",       player2:"Jayce Mamauag",          name:""},
-  {id:"b08a81bc8",level:"D",bracket:3,player1:"Sheda Manota",         player2:"Rj Rayos",               name:""},
-  {id:"c89103da0",level:"D",bracket:3,player1:"Jamaica Takahashi",    player2:"Leonard Medrano",        name:""},
-  {id:"c13042567",level:"D",bracket:3,player1:"Jason Oliver Lim",     player2:"Janella Dela Cruz",      name:""},
-  // Level D – Bracket 4
-  {id:"a05e71cdf",level:"D",bracket:4,player1:"Bea Santos",           player2:"Christone Mallari",      name:""},
-  {id:"4c341efdf",level:"D",bracket:4,player1:"Claro Ebette",         player2:"Ruth Partida",           name:""},
-  {id:"2eca4f019",level:"D",bracket:4,player1:"Arielle Anchote",      player2:"Arnold Abucejo",         name:""},
-  {id:"4c89e94f6",level:"D",bracket:4,player1:"Jozshelle Cruz",       player2:"Benjo Cruz",             name:""},
-  // Level C – Brackets 1-8
-  {id:"42d40a564",level:"C",bracket:1,player1:"JayJay",               player2:"Bhem",                   name:""},
-  {id:"7a404e766",level:"C",bracket:1,player1:"Sunitha Zenith Flores",player2:"Mckheizer Oyales",       name:""},
-  {id:"f001836a1",level:"C",bracket:1,player1:"Rizza",                player2:"Simeon",                 name:""},
-  {id:"7abebffd6",level:"C",bracket:1,player1:"Louie",                player2:"Harvey",                 name:""},
-  {id:"686c51e26",level:"C",bracket:2,player1:"Crivelli Gispin",      player2:"Kevin Badilla",          name:""},
-  {id:"bf60bd5b8",level:"C",bracket:2,player1:"Glenn Teves",          player2:"Jay AR",                 name:""},
-  {id:"9b263a88b",level:"C",bracket:2,player1:"Jhoven Roldan",        player2:"Mark Steven Quinto",     name:""},
-  {id:"08241b08c",level:"C",bracket:2,player1:"Prince Jeuf Camuta",   player2:"Zyrille Camuta",         name:""},
-  {id:"23acddf24",level:"C",bracket:3,player1:"MJ Royo",              player2:"Doc JC",                 name:""},
-  {id:"570a26dde",level:"C",bracket:3,player1:"Keith Suallo",         player2:"Jan Kristian Mirabel",   name:""},
-  {id:"44e826432",level:"C",bracket:3,player1:"Krissy",               player2:"Mark Leosala",           name:""},
-  {id:"eb63bd0dd",level:"C",bracket:3,player1:"Ronie Gaje",           player2:"Diane Patron",           name:""},
-  {id:"18e4a6fb9",level:"C",bracket:4,player1:"Ken Cotoner",          player2:"James Duran",            name:""},
-  {id:"192d50908",level:"C",bracket:4,player1:"Lily Camat",           player2:"Jeff Orbegoso",          name:""},
-  {id:"fae1f3a79",level:"C",bracket:4,player1:"Allan Tamayo",         player2:"Cristina Trabal",        name:""},
-  {id:"60e007850",level:"C",bracket:4,player1:"Paul Esquillon",       player2:"Rose Lyn Villanueva",    name:""},
-  {id:"d171eb87e",level:"C",bracket:5,player1:"Jerald Tuliao",        player2:"Deuzette De Dios",       name:""},
-  {id:"798eb531a",level:"C",bracket:5,player1:"Oliver Cesumission",   player2:"Jameela Cruz",           name:""},
-  {id:"f90139c99",level:"C",bracket:5,player1:"Barbie Macaraeg",      player2:"Nom",                    name:""},
-  {id:"848bb2432",level:"C",bracket:5,player1:"Xena Bugayong",        player2:"Oliver Jed Balgos",      name:""},
-  {id:"aab89c666",level:"C",bracket:6,player1:"Ivan Canlas",          player2:"Charlson Tolentino",     name:""},
-  {id:"e15c61815",level:"C",bracket:6,player1:"Jeffrey Carillo",      player2:"Rex Mabeza",             name:""},
-  {id:"4d61ce3d4",level:"C",bracket:6,player1:"Bion Henrik Priolo",   player2:"Jason Andrew Naraval",   name:""},
-  {id:"73744b9f8",level:"C",bracket:6,player1:"Jeric Brioso",         player2:"RK Ocampo",              name:""},
-  {id:"28917c122",level:"C",bracket:7,player1:"Bea Cegama Santos",    player2:"Paul Benjamin Lauzon",   name:""},
-  {id:"6380ce4ac",level:"C",bracket:7,player1:"Tony Rose Dacdac",     player2:"Kean Johan Salangsang",  name:""},
-  {id:"d62c7aa16",level:"C",bracket:7,player1:"Kat Alberto",          player2:"Dominic Alberto",        name:""},
-  {id:"05e12c3e2",level:"C",bracket:7,player1:"Jay R Cabatas",        player2:"Anne Matias",            name:""},
-  {id:"2d8b34ded",level:"C",bracket:8,player1:"John Etom",            player2:"Jonathan Santelices",    name:""},
-  {id:"48f597b18",level:"C",bracket:8,player1:"Sean Paul Jimenez",    player2:"Isiah Lawrence Quitoras",name:""},
-  {id:"c2e4a08d2",level:"C",bracket:8,player1:"Arthur Reyes",         player2:"Rowie Jane Nuval",       name:""},
-  {id:"30a7ce2f5",level:"C",bracket:8,player1:"Papi",                 player2:"Aaron",                  name:""},
-  // Level B – Brackets 1-3
-  {id:"5e4bb5095",level:"B",bracket:1,player1:"Denver De Guzman",     player2:"Fritz Collado",          name:""},
-  {id:"671b4adf2",level:"B",bracket:1,player1:"Joshua Justo",         player2:"Cheng",                  name:""},
-  {id:"bada92a8e",level:"B",bracket:1,player1:"Rick Diaz",            player2:"Paul Lauzon",            name:""},
-  {id:"29d47e939",level:"B",bracket:1,player1:"JayJay",               player2:"Louie",                  name:""},
-  {id:"ecb62e772",level:"B",bracket:2,player1:"Aniel Belaos",         player2:"Franz Datu",             name:""},
-  {id:"73dac1bde",level:"B",bracket:2,player1:"Ricky",                player2:"Angelo",                 name:""},
-  {id:"03b10c3d1",level:"B",bracket:2,player1:"Jap Pasion",           player2:"Mckheizer Oyales",       name:""},
-  {id:"7e0db3309",level:"B",bracket:2,player1:"Mj",                   player2:"Lg",                     name:""},
-  {id:"daa3b37e9",level:"B",bracket:3,player1:"Paul Esquillon",       player2:"Kean Johan Salangsang",  name:""},
-  {id:"9c40c9d82",level:"B",bracket:3,player1:"Jay R Cabatas",        player2:"Rj Rayos",               name:""},
-  {id:"0019fc1bb",level:"B",bracket:3,player1:"Mark Leosala",         player2:"Andrew",                 name:""},
-  {id:"f637bec3e",level:"B",bracket:3,player1:"Nick",                 player2:"Charlson",               name:""},
+ const players = [
+
+  // ===== LEVEL E =====
+  {id:"E1_1", level:"E", bracket:1, player1:"Jessie De guzman", player2:"Sheda Manota", name:""},
+  {id:"E1_2", level:"E", bracket:1, player1:"Patricia Luta", player2:"Ceferino Luta", name:""},
+  {id:"E1_3", level:"E", bracket:1, player1:"Xian Carlo Bangate", player2:"Jenchan Illustre", name:""},
+  {id:"E1_4", level:"E", bracket:1, player1:"Carlo Mansilla", player2:"Enrique Merlo", name:""},
+
+  {id:"E2_1", level:"E", bracket:2, player1:"Jenn Danganan", player2:"Kathreen Ydel", name:""},
+  {id:"E2_2", level:"E", bracket:2, player1:"Ruth Partida", player2:"Mark Marasigan", name:""},
+  {id:"E2_3", level:"E", bracket:2, player1:"Jessica Velasco", player2:"Mary ann Fransico", name:""},
+  {id:"E2_4", level:"E", bracket:2, player1:"Marjorie Barcelona", player2:"Kiel Mabeza", name:""},
+
+  {id:"E3_1", level:"E", bracket:3, player1:"Kalvin Dacusin", player2:"Paul Anatalio", name:""},
+  {id:"E3_2", level:"E", bracket:3, player1:"Apollo Marfito", player2:"Cedric Jalandoni", name:""},
+  {id:"E3_3", level:"E", bracket:3, player1:"Jason Cansino", player2:"Kaye Cansino", name:""},
+  {id:"E3_4", level:"E", bracket:3, player1:"Robin Vicente", player2:"Ram Mendoza", name:""},
+
+
+  // ===== LEVEL D =====
+  {id:"D1_1", level:"D", bracket:1, player1:"Ralph Lopez", player2:"Rick Diaz", name:""},
+  {id:"D1_2", level:"D", bracket:1, player1:"Jaymi Chow", player2:"Juramer Itlanas", name:""},
+  {id:"D1_3", level:"D", bracket:1, player1:"Matthew Mirallosa", player2:"Venice Mariel Develos", name:""},
+  {id:"D1_4", level:"D", bracket:1, player1:"Anthony Longasa", player2:"Joshua Sandova", name:""},
+
+  {id:"D2_1", level:"D", bracket:2, player1:"Xena Bugayong", player2:"Oliver Jed Balgos", name:""},
+  {id:"D2_2", level:"D", bracket:2, player1:"Ariadne Denzon", player2:"Arlene Denzon", name:""},
+  {id:"D2_3", level:"D", bracket:2, player1:"Franjet", player2:"Thea", name:""},
+  {id:"D2_4", level:"D", bracket:2, player1:"Jean Lee", player2:"Mike Arevalo", name:""},
+
+  {id:"D3_1", level:"D", bracket:3, player1:"Mimoy De Jesus", player2:"Jayce Mamauag", name:""},
+  {id:"D3_2", level:"D", bracket:3, player1:"Sheda Manota", player2:"Rj Rayos", name:""},
+  {id:"D3_3", level:"D", bracket:3, player1:"Jamaica Takahashi", player2:"Leonard Medrano", name:""},
+  {id:"D3_4", level:"D", bracket:3, player1:"Jason Oliver Lim", player2:"Janella Dela Cruz", name:""},
+
+  {id:"D4_1", level:"D", bracket:4, player1:"Bea Santos", player2:"Christone Mallari", name:""},
+  {id:"D4_2", level:"D", bracket:4, player1:"Claro Ebette", player2:"Ruth Partida", name:""},
+  {id:"D4_3", level:"D", bracket:4, player1:"Arielle Anchote", player2:"Arnold Abucejo", name:""},
+  {id:"D4_4", level:"D", bracket:4, player1:"Jozshelle Cruz", player2:"Benjo Cruz", name:""},
+
+
+  // ===== LEVEL C =====
+  {id:"C1_1", level:"C", bracket:1, player1:"JayJay Cominghod", player2:"Bhem Ropero", name:""},
+  {id:"C1_2", level:"C", bracket:1, player1:"Sunitha Zenith Flores", player2:"Mckheizer Oyales", name:""},
+  {id:"C1_3", level:"C", bracket:1, player1:"Rizza", player2:"Simeon", name:""},
+  {id:"C1_4", level:"C", bracket:1, player1:"Louie Bernales", player2:"Harvey Del Rosario", name:""},
+
+  {id:"C2_1", level:"C", bracket:2, player1:"Crivelli Gispin", player2:"Kevin Badilla", name:""},
+  {id:"C2_2", level:"C", bracket:2, player1:"Glenn Teves", player2:"Jay AR", name:""},
+  {id:"C2_3", level:"C", bracket:2, player1:"Jhoven Roldan", player2:"Mark Steven Quinto", name:""},
+  {id:"C2_4", level:"C", bracket:2, player1:"Prince Jeuf Camuta", player2:"Zyrille Camuta", name:""},
+
+  {id:"C3_1", level:"C", bracket:3, player1:"MJ Royo", player2:"Doc JC", name:""},
+  {id:"C3_2", level:"C", bracket:3, player1:"Keith Suallo", player2:"Jan Kristian Mirabel", name:""},
+  {id:"C3_3", level:"C", bracket:3, player1:"Krissy Davis", player2:"Mark Leosala", name:""},
+  {id:"C3_4", level:"C", bracket:3, player1:"Ronie Gaje", player2:"Diane Patron", name:""},
+
+  {id:"C4_1", level:"C", bracket:4, player1:"Ken Cotoner", player2:"James Duran", name:""},
+  {id:"C4_2", level:"C", bracket:4, player1:"Lily Camat", player2:"Jeff Orbegoso", name:""},
+  {id:"C4_3", level:"C", bracket:4, player1:"Allan Tamayo", player2:"Cristina Trabal", name:""},
+  {id:"C4_4", level:"C", bracket:4, player1:"Paul Esquillon", player2:"Rose Lyn Villanueva", name:""},
+
+  {id:"C5_1", level:"C", bracket:5, player1:"Jerald Tuliao", player2:"Deuzette De Dios", name:""},
+  {id:"C5_2", level:"C", bracket:5, player1:"Oliver Cesumission", player2:"Jameela Cruz", name:""},
+  {id:"C5_3", level:"C", bracket:5, player1:"Barbie Macaraeg", player2:"Nom", name:""},
+  {id:"C5_4", level:"C", bracket:5, player1:"Calbert", player2:"Kiel Mabeza", name:""},
+
+  {id:"C6_1", level:"C", bracket:6, player1:"Ivan Canlas", player2:"Charlson Tolentino", name:""},
+  {id:"C6_2", level:"C", bracket:6, player1:"Jeffrey Carillo", player2:"Rex Mabeza", name:""},
+  {id:"C6_3", level:"C", bracket:6, player1:"Bion Henrik Priolo", player2:"Jason Andrew Naraval", name:""},
+  {id:"C6_4", level:"C", bracket:6, player1:"John Etom", player2:"Jonathan Santelices", name:""},
+
+  {id:"C7_1", level:"C", bracket:7, player1:"Bea Cegama Santos", player2:"Paul benjamin Lauzon", name:""},
+  {id:"C7_2", level:"C", bracket:7, player1:"Tony rose Dacdac", player2:"Kean Johan Salangsang", name:""},
+  {id:"C7_3", level:"C", bracket:7, player1:"Kat Alberto", player2:"Dominic Alberto", name:""},
+  {id:"C7_4", level:"C", bracket:7, player1:"Jay R Cabatas", player2:"Anne Matias", name:""},
+
+  {id:"C8_1", level:"C", bracket:8, player1:"Jeric Brioso", player2:"RK Ocampo", name:""},
+  {id:"C8_2", level:"C", bracket:8, player1:"Sean Paul Jimenez", player2:"Isiah Lawrence Quitoras", name:""},
+  {id:"C8_3", level:"C", bracket:8, player1:"Arthur Reyes", player2:"Rowie Jane Nuval", name:""},
+  {id:"C8_4", level:"C", bracket:8, player1:"Papi", player2:"Aaron", name:""},
+
+
+  // ===== LEVEL B =====
+  {id:"B1_1", level:"B", bracket:1, player1:"Denver De Guzman", player2:"Fritz Collado", name:""},
+  {id:"B1_2", level:"B", bracket:1, player1:"Joshua Justo", player2:"Cheng", name:""},
+  {id:"B1_3", level:"B", bracket:1, player1:"Rick Diaz", player2:"Paul Lauzon", name:""},
+  {id:"B1_4", level:"B", bracket:1, player1:"JayJay Cominghod", player2:"Louie Bernales", name:""},
+
+  {id:"B2_1", level:"B", bracket:2, player1:"Aniel Belaos", player2:"Franz Datu", name:""},
+  {id:"B2_2", level:"B", bracket:2, player1:"Ricky", player2:"Angelo", name:""},
+  {id:"B2_3", level:"B", bracket:2, player1:"Jap Pasion", player2:"Mckheizer Oyales", name:""},
+  {id:"B2_4", level:"B", bracket:2, player1:"Mj Balane", player2:"Lg Macabale", name:""},
+
+  {id:"B3_1", level:"B", bracket:3, player1:"Paul Esquillon", player2:"Kean Johan Salangsang", name:""},
+  {id:"B3_2", level:"B", bracket:3, player1:"Jay R Cabatas", player2:"Rj Rayos", name:""},
+  {id:"B3_3", level:"B", bracket:3, player1:"Mark Leosala", player2:"Andrew Arugay", name:""},
+  {id:"B3_4", level:"B", bracket:3, player1:"Dominic Alberto", player2:"Charlson Tolentino", name:""}
+
 ];
 
 /* ══════════════════════════════════════════════════════
