@@ -99,7 +99,7 @@ function minutesToTime(m) {
 function uid() { return Math.random().toString(36).substr(2,9); }
 
 // Bump this whenever the schedule algorithm changes — clears stale localStorage
-const SCHEDULE_VERSION = "v6";
+const SCHEDULE_VERSION = "v7";
 
 // ── localStorage (device-local only: role, PIN, firebase config) ──────
 function useLocalStorage(key, initial) {
@@ -905,7 +905,7 @@ function MatchCard({ match, matchState, onUpdate, onReschedule }) {
         {[["home",home],["away",away]].map(([side,team]) => (
           <button key={side} onClick={() => onUpdate({winner: winner===side ? null : side})}
             style={{flex:1,background:winner===side?`${C.pink}33`:"transparent",border:`1px solid ${winner===side?C.pink:C.border}`,borderRadius:7,padding:"5px 8px",color:winner===side?C.pink:C.muted,fontSize:11,cursor:"pointer",fontWeight:winner===side?700:400,transition:"all 0.15s",minWidth:70}}>
-            🏆 {team.player1.split(" ")[0]}
+            🏆 {String(team.player1 || "TBA").split(" ")[0]}
           </button>
         ))}
       </div>
@@ -1308,7 +1308,7 @@ function KOMatchCard({ homeTeam, awayTeam, matchData, onUpdate, roundLabel, matc
         {/* Home */}
         <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:4}}>
           <div style={{flex:1, fontSize:12, color:winner==="home"?C.pink:homeTeam?C.white:C.muted, fontWeight:winner==="home"?700:400, lineHeight:1.3}}>
-            {winner==="home" && "🏆 "}{homeTeam ? `${homeTeam.player1} & ${homeTeam.player2}` : "TBD"}
+            {winner==="home" && "🏆 "}{homeTeam ? `${homeTeam.player1||homeTeam.name||homeTeam} & ${homeTeam.player2||""}`.trim().replace(/& $/, "") : "TBD"}
           </div>
           <input type="number" min="0" max="99" value={scoreHome} disabled={!hasTeams}
             onChange={e=>onUpdate({scoreHome:e.target.value})}
@@ -1318,7 +1318,7 @@ function KOMatchCard({ homeTeam, awayTeam, matchData, onUpdate, roundLabel, matc
         {/* Away */}
         <div style={{display:"flex", alignItems:"center", gap:8, marginTop:4}}>
           <div style={{flex:1, fontSize:12, color:winner==="away"?C.pink:awayTeam?C.white:C.muted, fontWeight:winner==="away"?700:400, lineHeight:1.3}}>
-            {winner==="away" && "🏆 "}{awayTeam ? `${awayTeam.player1} & ${awayTeam.player2}` : "TBD"}
+            {winner==="away" && "🏆 "}{awayTeam ? `${awayTeam.player1||awayTeam.name||awayTeam} & ${awayTeam.player2||""}`.trim().replace(/& $/, "") : "TBD"}
           </div>
           <input type="number" min="0" max="99" value={scoreAway} disabled={!hasTeams}
             onChange={e=>onUpdate({scoreAway:e.target.value})}
@@ -1330,7 +1330,7 @@ function KOMatchCard({ homeTeam, awayTeam, matchData, onUpdate, roundLabel, matc
             {[["home",homeTeam],["away",awayTeam]].map(([side,team]) => (
               <button key={side} onClick={()=>onUpdate({winner:winner===side?null:side})}
                 style={{flex:1, background:winner===side?`${C.pink}33`:"transparent", border:`1px solid ${winner===side?C.pink:C.border}`, borderRadius:7, padding:"4px 8px", color:winner===side?C.pink:C.muted, fontSize:11, cursor:"pointer", fontWeight:winner===side?700:400, transition:"all 0.15s"}}>
-                {team.player1.split(" ")[0]} wins 🐾
+                {String(typeof team === "string" ? team : (team?.player1 || team?.name || "TBA")).split(" ")[0]} wins 🐾
               </button>
             ))}
           </div>
