@@ -145,11 +145,18 @@ function getTournamentRef() {
   catch(e) { console.error("❌ Firestore ref error:", e); return null; }
 }
 const _listeners = {};
-let   _docData   = null;
+let   _docData       = null;
+// Fields we recently wrote locally — ignore Firebase echoes for these for 5s
+const _localWrites   = {};
+function _lockField(field, ms=5000) { _localWrites[field] = Date.now() + ms; }
+function _isLocked(field) { return (_localWrites[field] || 0) > Date.now(); }
+
 function _notify(data) {
-  _docData = data;
+  _docData = { ...(_docData||{}), ...data };
   Object.keys(_listeners).forEach(field => {
-    if (field in data) _listeners[field].forEach(fn => fn(data[field]));
+    if (field in data && !_isLocked(field)) {
+      _listeners[field].forEach(fn => fn(data[field]));
+    }
   });
 }
 let _unsubscribe = null;
@@ -159,7 +166,6 @@ function _ensureListening() {
   if (!ref) { console.error("❌ No ref — cannot listen"); return; }
   console.log("🔥 Starting onSnapshot listener...");
   _unsubscribe = ref.onSnapshot(snap => {
-    console.log("📡 Snapshot received — fields:", snap.exists ? Object.keys(snap.data()) : "empty");
     if (snap && snap.exists) _notify(snap.data());
   }, err => {
     console.error("❌ onSnapshot error:", err.code, err.message);
@@ -170,8 +176,18 @@ async function saveField(field, value) {
   try {
     const ref = getTournamentRef();
     if (!ref) return;
+    _lockField(field);
     await ref.set({ [field]: value }, { merge: true });
   } catch(e) { console.error("❌ Save failed:", field, e.code, e.message); }
+}
+// Write multiple fields atomically and lock all of them
+async function saveFields(obj) {
+  try {
+    const ref = getTournamentRef();
+    if (!ref) return;
+    Object.keys(obj).forEach(f => _lockField(f));
+    await ref.set(obj, { merge: true });
+  } catch(e) { console.error("❌ saveFields failed:", e.code, e.message); }
 }
 function useSharedState(field, initial) {
   const lsKey = `ps_${field}`;
@@ -942,11 +958,8 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
       const s = buildSchedule(teams);
       setSchedule(s);
       setScheduleVersion(SCHEDULE_VERSION);
-      // Write both atomically so no snapshot can arrive with mismatched version
-      try {
-        const ref = getTournamentRef();
-        if (ref) ref.set({ schedule: s, scheduleVersion: SCHEDULE_VERSION, matchStates: {} }, { merge: true });
-      } catch(e) {}
+      setMatchStates({});
+      saveFields({ schedule: s, scheduleVersion: SCHEDULE_VERSION, matchStates: {} });
     }
   };
 
@@ -955,11 +968,7 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
     setSchedule(s);
     setMatchStates({});
     setScheduleVersion(SCHEDULE_VERSION);
-    // Write atomically — prevents Firebase echo from clearing the new schedule
-    try {
-      const ref = getTournamentRef();
-      if (ref) ref.set({ schedule: s, scheduleVersion: SCHEDULE_VERSION, matchStates: {} }, { merge: true });
-    } catch(e) {}
+    saveFields({ schedule: s, scheduleVersion: SCHEDULE_VERSION, matchStates: {} });
   };
 
   // Reschedule: update court/time for a single match in the schedule array
