@@ -939,15 +939,27 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
 
   const generate = () => {
     if (!schedule.length) {
-      setSchedule(buildSchedule(teams));
+      const s = buildSchedule(teams);
+      setSchedule(s);
       setScheduleVersion(SCHEDULE_VERSION);
+      // Write both atomically so no snapshot can arrive with mismatched version
+      try {
+        const ref = getTournamentRef();
+        if (ref) ref.set({ schedule: s, scheduleVersion: SCHEDULE_VERSION, matchStates: {} }, { merge: true });
+      } catch(e) {}
     }
   };
 
   const regenerate = () => {
-    setSchedule(buildSchedule(teams));
+    const s = buildSchedule(teams);
+    setSchedule(s);
     setMatchStates({});
     setScheduleVersion(SCHEDULE_VERSION);
+    // Write atomically — prevents Firebase echo from clearing the new schedule
+    try {
+      const ref = getTournamentRef();
+      if (ref) ref.set({ schedule: s, scheduleVersion: SCHEDULE_VERSION, matchStates: {} }, { merge: true });
+    } catch(e) {}
   };
 
   // Reschedule: update court/time for a single match in the schedule array
@@ -2092,14 +2104,10 @@ function App() {
   const [koData,          setKoData]          = useSharedState("koData", {});
   const [koFormats,       setKoFormats]       = useSharedState("koFormats", { B:"sf", C:"qf", D:"sf", E:"sf" });
 
-  // ── Clear stale schedule on version mismatch ──
-  useEffect(() => {
-    if (scheduleVersion !== "" && scheduleVersion !== SCHEDULE_VERSION) {
-      setSchedule([]);
-      setMatchStates({});
-      setScheduleVersion(SCHEDULE_VERSION);
-    }
-  }, [scheduleVersion]);
+  // ── Clear stale schedule on version mismatch (init only, not reactive) ──
+  // NOTE: Reactive clearing was removed because Firebase snapshots can echo back
+  // the old scheduleVersion after a regenerate, causing the new schedule to disappear.
+  // Stale data is cleared synchronously in the useState initializer above instead.
 
   // ── If URL forces a role but state drifted, correct it ──
   useEffect(() => {
