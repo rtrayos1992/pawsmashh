@@ -41,25 +41,6 @@
   <script type="text/babel" data-presets="react">
     const { useState, useMemo, useCallback, useEffect } = React;
 
-class ErrorBoundary extends React.Component {
-  constructor(props) { super(props); this.state = { error: null }; }
-  static getDerivedStateFromError(e) { return { error: e }; }
-  render() {
-    if (this.state.error) return (
-      <div style={{background:"#1a0a0e",color:"#e74c3c",padding:32,fontFamily:"monospace",fontSize:13,minHeight:"100vh"}}>
-        <div style={{fontSize:24,marginBottom:16}}>💥 App crashed</div>
-        <div style={{marginBottom:8,color:"#fff"}}>{this.state.error.message}</div>
-        <pre style={{color:"#f472b6",fontSize:11,whiteSpace:"pre-wrap"}}>{this.state.error.stack}</pre>
-        <button onClick={()=>{ localStorage.clear(); location.reload(); }}
-          style={{marginTop:20,padding:"10px 20px",background:"#e74c3c",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontSize:14}}>
-          🗑️ Clear all data & reload
-        </button>
-      </div>
-    );
-    return this.props.children;
-  }
-}
-
 
 /* ══════════════════════════════════════════════════════
    THEME & CONSTANTS
@@ -91,22 +72,6 @@ const LEVEL_COURTS   = { E:[1,2], D:[3,4], C:[5,6,7] };
 /* ══════════════════════════════════════════════════════
    UTILITY FUNCTIONS
 ══════════════════════════════════════════════════════ */
-// ── Safe team display helpers (used across MatchCard, KOMatchCard, PlayerMatchCard) ──
-function teamLabel(t) {
-  if (!t) return "TBD";
-  if (typeof t === "string") return t;
-  const p1 = typeof t.player1 === "string" ? t.player1 : "";
-  const p2 = typeof t.player2 === "string" ? t.player2 : "";
-  if (p1 && p2) return `${p1} & ${p2}`;
-  if (p1) return p1;
-  if (typeof t.name === "string" && t.name) return t.name;
-  return "TBD";
-}
-function teamShort(t) {
-  const label = teamLabel(t);
-  return label === "TBD" ? "TBD" : label.split(" ")[0];
-}
-
 function minutesToTime(m) {
   const h=Math.floor(m/60), min=m%60, ampm=h>=12?"PM":"AM";
   const h12 = h > 12 ? h-12 : h === 0 ? 12 : h;
@@ -115,7 +80,7 @@ function minutesToTime(m) {
 function uid() { return Math.random().toString(36).substr(2,9); }
 
 // Bump this whenever the schedule algorithm changes — clears stale localStorage
-const SCHEDULE_VERSION = "v8";
+const SCHEDULE_VERSION = "v4";
 
 // ── localStorage (device-local only: role, PIN, firebase config) ──────
 function useLocalStorage(key, initial) {
@@ -145,18 +110,11 @@ function getTournamentRef() {
   catch(e) { console.error("❌ Firestore ref error:", e); return null; }
 }
 const _listeners = {};
-let   _docData       = null;
-// Fields we recently wrote locally — ignore Firebase echoes for these for 5s
-const _localWrites   = {};
-function _lockField(field, ms=5000) { _localWrites[field] = Date.now() + ms; }
-function _isLocked(field) { return (_localWrites[field] || 0) > Date.now(); }
-
+let   _docData   = null;
 function _notify(data) {
-  _docData = { ...(_docData||{}), ...data };
+  _docData = data;
   Object.keys(_listeners).forEach(field => {
-    if (field in data && !_isLocked(field)) {
-      _listeners[field].forEach(fn => fn(data[field]));
-    }
+    if (field in data) _listeners[field].forEach(fn => fn(data[field]));
   });
 }
 let _unsubscribe = null;
@@ -166,6 +124,7 @@ function _ensureListening() {
   if (!ref) { console.error("❌ No ref — cannot listen"); return; }
   console.log("🔥 Starting onSnapshot listener...");
   _unsubscribe = ref.onSnapshot(snap => {
+    console.log("📡 Snapshot received — fields:", snap.exists ? Object.keys(snap.data()) : "empty");
     if (snap && snap.exists) _notify(snap.data());
   }, err => {
     console.error("❌ onSnapshot error:", err.code, err.message);
@@ -176,18 +135,8 @@ async function saveField(field, value) {
   try {
     const ref = getTournamentRef();
     if (!ref) return;
-    _lockField(field);
     await ref.set({ [field]: value }, { merge: true });
   } catch(e) { console.error("❌ Save failed:", field, e.code, e.message); }
-}
-// Write multiple fields atomically and lock all of them
-async function saveFields(obj) {
-  try {
-    const ref = getTournamentRef();
-    if (!ref) return;
-    Object.keys(obj).forEach(f => _lockField(f));
-    await ref.set(obj, { merge: true });
-  } catch(e) { console.error("❌ saveFields failed:", e.code, e.message); }
 }
 function useSharedState(field, initial) {
   const lsKey = `ps_${field}`;
@@ -261,22 +210,22 @@ function buildSchedule(teams) {
   // ── Core scheduler ─────────────────────────────────────────────────
   // playerFree is shared across ALL levels so cross-level players
   // (who appear in e.g. both Level B and Level C) also get rest gaps.
-  // courtStart: earliest time any court can be used (default START_MINUTES)
-  function assignWithRest(matchList, courts, playerFree, courtStart = START_MINUTES) {
+  function assignWithRest(matchList, courts, playerFree) {
     const courtFree = {};
-    courts.forEach(c => { courtFree[c] = courtStart; });
+    courts.forEach(c => { courtFree[c] = START_MINUTES; });
     const pending = [...matchList];
 
     while (pending.length) {
       let bestIdx = 0, bestStart = Infinity, bestCourt = courts[0];
 
       pending.forEach((m, i) => {
+        // Use BOTH team-id and player-name keys so cross-level conflicts are caught
         const keys = [
           m.home.id, m.away.id,
           playerKey(m.home.player1), playerKey(m.home.player2),
           playerKey(m.away.player1), playerKey(m.away.player2),
         ];
-        const teamEarliest = Math.max(...keys.map(k => playerFree[k] || courtStart));
+        const teamEarliest = Math.max(...keys.map(k => playerFree[k] || START_MINUTES));
         courts.forEach(c => {
           const s = Math.max(courtFree[c], teamEarliest);
           if (s < bestStart) { bestStart=s; bestIdx=i; bestCourt=c; }
@@ -287,7 +236,8 @@ function buildSchedule(teams) {
       const s = bestStart;
       const e = s + MATCH_DURATION;
       courtFree[bestCourt] = e;
-      const restUntil = e + MATCH_DURATION;
+      const restUntil = e + MATCH_DURATION; // 1-match gap
+      // Mark all player keys so cross-level conflicts are prevented
       [
         m.home.id, m.away.id,
         playerKey(m.home.player1), playerKey(m.home.player2),
@@ -310,111 +260,15 @@ function buildSchedule(teams) {
   }
 
   // ── Step 3: schedule all levels sharing ONE playerFree map ─────────
-  // Level B starts only after ALL of E, D, C are fully done.
+  // This is the key fix: cross-level players (e.g. someone in both B & C)
+  // will have their rest enforced even across different court assignments.
   const playerFree = {};
   ["E","D","C"].forEach(lv => {
     const keys = Object.keys(groups).filter(k => k.startsWith(lv));
     if (keys.length) assignWithRest(interleave(keys), LEVEL_COURTS[lv], playerFree);
   });
-
-  // Find when the last E/D/C match ends — Level B cannot start before that
-  const lastEDCEnd = out.length
-    ? Math.max(...out.map(m => m.endMin))
-    : START_MINUTES;
-
-  // Push all playerFree times forward to lastEDCEnd so Level B
-  // won't be scheduled into any court slot before E/D/C finish
   const bKeys = Object.keys(groups).filter(k => k.startsWith("B"));
-  if (bKeys.length) {
-    // Level B courts open only at lastEDCEnd — passed as courtStart
-    // Also push any cross-level player rest times forward to lastEDCEnd
-    const bPlayerFree = {};
-    Object.keys(playerFree).forEach(k => {
-      bPlayerFree[k] = Math.max(playerFree[k] || START_MINUTES, lastEDCEnd);
-    });
-    assignWithRest(interleave(bKeys), [1,2,3,4,5,6,7], bPlayerFree, lastEDCEnd);
-  }
-
-  // ── Step 4: Knockout placeholder matches ──────────────────────────
-  // These are appended after all elimination rounds (after Level B ends).
-  // Teams show as TBA until seeded from the Knockout tab.
-  const lastAllEnd = out.length ? Math.max(...out.map(m => m.endMin)) : START_MINUTES;
-
-  // KO structure per level
-  // Keys match mKey() convention: {level}_{round}_{idx}
-  const KO_ROUNDS = {
-    E: ["SF_0","SF_1","F_0"],
-    D: ["SF_0","SF_1","F_0"],
-    C: ["QF_0","QF_1","QF_2","QF_3","SF_0","SF_1","F_0"],
-    B: ["SF_0","SF_1","F_0"],
-  };
-  const KO_ROUND_LABELS = {
-    QF_0:"QF 1", QF_1:"QF 2", QF_2:"QF 3", QF_3:"QF 4",
-    SF_0:"Semi 1", SF_1:"Semi 2", F_0:"Final"
-  };
-
-  // Schedule KO matches sequentially, 2 per timeslot across all 7 courts
-  // Each round waits for the previous round to finish
-  let koTime = lastAllEnd + MATCH_DURATION; // buffer gap after elim rounds
-
-  // Process levels in order: E, D, C, B — but interleaved by round
-  // Actually schedule round-by-round across all levels simultaneously
-  const koMatches = [];
-  // Build a flat list: [{ level, roundKey, label }]
-  const allKORounds = [];
-  // Round order: QF (C only), then SF (all), then Finals (all)
-  const roundOrder = ["QF_0","QF_1","QF_2","QF_3","SF_0","SF_1","F_0"];
-  roundOrder.forEach(rk => {
-    ["E","D","C","B"].forEach(lv => {
-      if (KO_ROUNDS[lv].includes(rk)) {
-        allKORounds.push({ level: lv, roundKey: rk, label: KO_ROUND_LABELS[rk] });
-      }
-    });
-  });
-
-  // Group into time waves: fill up to 2 per slot (courts 1-7, 2 at a time)
-  // Actually just space them: every 2 KO matches = 1 timeslot, stagger by 20min
-  let koSlot = koTime;
-  const koCourtCycle = [1,2,3,4,5,6,7];
-  let courtIdx = 0;
-
-  // Track which round of each level is currently waiting
-  // Schedule QFs first (C only), then SFs, then Finals
-  // Group by "wave": all QFs together, all SFs together, all Finals together
-  const waves = [
-    allKORounds.filter(r => r.roundKey.startsWith("QF")),
-    allKORounds.filter(r => r.roundKey.startsWith("SF")),
-    allKORounds.filter(r => r.roundKey === "F_0"),
-  ];
-
-  waves.forEach(wave => {
-    if (!wave.length) return;
-    // Reset court index at start of each wave, new time slot
-    courtIdx = 0;
-    wave.forEach((r, i) => {
-      // Every 2 matches, advance the timeslot
-      if (i > 0 && i % 2 === 0) { koSlot += MATCH_DURATION; courtIdx = 0; }
-      const court = koCourtCycle[courtIdx % koCourtCycle.length];
-      courtIdx++;
-      const id = `ko_${r.level}_${r.roundKey}`;
-      // koRound matches mKey format: e.g. "SF_0" → koData key is "{level}_SF_0"
-      out.push({
-        id,
-        level: r.level,
-        bracket: 0,
-        isKO: true,
-        koRound: r.roundKey,
-        koLabel: r.label,
-        court,
-        startMin: koSlot,
-        endMin: koSlot + MATCH_DURATION,
-        home: { id: `${id}_home`, player1: "TBA", player2: "", name: "" },
-        away: { id: `${id}_away`, player1: "TBA", player2: "", name: "" },
-      });
-    });
-    // Advance time after each wave
-    koSlot += MATCH_DURATION * 2;
-  });
+  if (bKeys.length) assignWithRest(interleave(bKeys), [1,2,3,4,5,6,7], playerFree);
 
   return out;
 }
@@ -425,9 +279,8 @@ function isDone(s) {
 }
 
 function computeStandings(teams, matches, matchStates) {
-  const rrMatches = matches.filter(m => !m.isKO); // exclude KO placeholders
   return [...teams].map(t => {
-    const games  = rrMatches.filter(m => m.home.id===t.id || m.away.id===t.id);
+    const games  = matches.filter(m => m.home.id===t.id || m.away.id===t.id);
     const played = games.filter(m => isDone(matchStates[m.id])).length;
     const wins   = games.filter(m => {
       const s = matchStates[m.id];
@@ -650,8 +503,7 @@ function LevelBadge({ level, size=11 }) {
   return <span style={{background:lm.gradient,color:lm.text,borderRadius:5,padding:`1px ${size-2}px`,fontSize:size,fontWeight:800,fontFamily:"'Fredoka One',sans-serif",letterSpacing:1,flexShrink:0}}>{level}</span>;
 }
 function BktBadge({ bracket, size=11 }) {
-  const idx = ((bracket-1) % BKT_COLORS.length + BKT_COLORS.length) % BKT_COLORS.length;
-  const bc = BKT_COLORS[idx] || C.pink;
+  const bc = BKT_COLORS[(bracket-1)%BKT_COLORS.length];
   return <span style={{background:`${bc}33`,color:bc,border:`1px solid ${bc}66`,borderRadius:5,padding:`1px ${size-2}px`,fontSize:size,fontWeight:700,flexShrink:0}}>B{bracket}</span>;
 }
 
@@ -817,7 +669,7 @@ function BracketView({ teams, levels, brackets }) {
    MATCH CARD (Round Robin / Schedule)
 ══════════════════════════════════════════════════════ */
 function MatchCard({ match, matchState, onUpdate, onReschedule }) {
-  const { home, away, court, startMin, level, bracket, isKO=false, koLabel="" } = match;
+  const { home, away, court, startMin, level, bracket } = match;
   const { scoreHome="", scoreAway="", winner=null, matchStatus="pending" } = matchState || {};
   const cc = COURT_COLORS[(court-1) % COURT_COLORS.length];
   const isLate = startMin >= END_MINUTES;
@@ -852,10 +704,7 @@ function MatchCard({ match, matchState, onUpdate, onReschedule }) {
       <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:10}}>
         <div style={{background:`${cc}33`,border:`1px solid ${cc}66`,borderRadius:7,padding:"2px 9px",fontFamily:"'Fredoka One',sans-serif",fontSize:13,color:cc,flexShrink:0}}>C{court}</div>
         <LevelBadge level={level}/>
-        {isKO
-          ? <span style={{background:"rgba(255,215,0,0.15)",color:"#ffd700",border:"1px solid rgba(255,215,0,0.4)",borderRadius:5,padding:"1px 9px",fontSize:11,fontWeight:900,letterSpacing:0.5,flexShrink:0}}>🏆 {koLabel}</span>
-          : <BktBadge bracket={bracket}/>
-        }
+        <BktBadge bracket={bracket}/>
         <div style={{marginLeft:"auto",fontSize:11,color:isLate?"#e74c3c":C.muted,flexShrink:0}}>
           {minutesToTime(startMin)}{isLate?" ⚠️":""}
         </div>
@@ -903,11 +752,11 @@ function MatchCard({ match, matchState, onUpdate, onReschedule }) {
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
         <div style={{flex:1}}>
           <div style={{fontSize:13,color:winner==="home"?C.pink:C.white,fontWeight:winner==="home"?700:500}}>
-            {winner==="home" && "🏆 "}{teamLabel(home)}
+            {winner==="home" && "🏆 "}{home.player1} & {home.player2}
           </div>
           <div style={{fontSize:11,color:C.muted,margin:"3px 0"}}>vs</div>
           <div style={{fontSize:13,color:winner==="away"?C.pink:C.white,fontWeight:winner==="away"?700:500}}>
-            {winner==="away" && "🏆 "}{teamLabel(away)}
+            {winner==="away" && "🏆 "}{away.player1} & {away.player2}
           </div>
         </div>
         {/* Score inputs — always visible */}
@@ -937,7 +786,7 @@ function MatchCard({ match, matchState, onUpdate, onReschedule }) {
         {[["home",home],["away",away]].map(([side,team]) => (
           <button key={side} onClick={() => onUpdate({winner: winner===side ? null : side})}
             style={{flex:1,background:winner===side?`${C.pink}33`:"transparent",border:`1px solid ${winner===side?C.pink:C.border}`,borderRadius:7,padding:"5px 8px",color:winner===side?C.pink:C.muted,fontSize:11,cursor:"pointer",fontWeight:winner===side?700:400,transition:"all 0.15s",minWidth:70}}>
-            🏆 {teamShort(team)}
+            🏆 {team.player1.split(" ")[0]}
           </button>
         ))}
       </div>
@@ -948,27 +797,22 @@ function MatchCard({ match, matchState, onUpdate, onReschedule }) {
 /* ══════════════════════════════════════════════════════
    SCHEDULE VIEW
 ══════════════════════════════════════════════════════ */
-function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchStates, updateMatchState, setScheduleVersion, koData={} }) {
+function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchStates, updateMatchState, setScheduleVersion }) {
   const [viewMode,   setViewMode]   = useState("time");
   const [filterLv,   setFilterLv]   = useState("ALL");
   const [filterCt,   setFilterCt]   = useState("ALL");
 
   const generate = () => {
     if (!schedule.length) {
-      const s = buildSchedule(teams);
-      setSchedule(s);
+      setSchedule(buildSchedule(teams));
       setScheduleVersion(SCHEDULE_VERSION);
-      setMatchStates({});
-      saveFields({ schedule: s, scheduleVersion: SCHEDULE_VERSION, matchStates: {} });
     }
   };
 
   const regenerate = () => {
-    const s = buildSchedule(teams);
-    setSchedule(s);
+    setSchedule(buildSchedule(teams));
     setMatchStates({});
     setScheduleVersion(SCHEDULE_VERSION);
-    saveFields({ schedule: s, scheduleVersion: SCHEDULE_VERSION, matchStates: {} });
   };
 
   // Reschedule: update court/time for a single match in the schedule array
@@ -976,41 +820,20 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
     setSchedule(prev => prev.map(m => m.id === id ? { ...m, ...changes } : m));
   }, [setSchedule]);
 
-  // Merge live KO team names from koData into KO placeholder matches
-  const scheduleWithKO = useMemo(() => schedule.map(m => {
-    if (!m || !m.isKO) return m;
-    const lvData = (koData && koData[m.level]) || {};
-    const koKey  = `${m.level}_${m.koRound || ""}`;
-    const slot   = lvData[koKey] || {};
-    const homeName = slot.homeTeam || "TBA";
-    const awayName = slot.awayTeam || "TBA";
-    return {
-      ...m,
-      home: { ...m.home, player1: homeName, player2: "", name: homeName },
-      away: { ...m.away, player1: awayName, player2: "", name: awayName },
-    };
-  }), [schedule, koData]);
-
   const filtered = useMemo(() =>
-    scheduleWithKO.filter(m =>
+    schedule.filter(m =>
       (filterLv==="ALL" || m.level===filterLv) &&
       (filterCt==="ALL" || m.court===Number(filterCt))
-    ), [scheduleWithKO, filterLv, filterCt]);
+    ), [schedule, filterLv, filterCt]);
 
-  const rrSchedule = useMemo(() => schedule.filter(m=>!m.isKO), [schedule]);
-  const lateCount = useMemo(() => rrSchedule.filter(m=>m.endMin>END_MINUTES).length, [rrSchedule]);
-  const doneCount = useMemo(() => rrSchedule.filter(m=>isDone(matchStates[m.id])).length, [rrSchedule, matchStates]);
+  const lateCount = useMemo(() => schedule.filter(m=>m.endMin>END_MINUTES).length, [schedule]);
+  const doneCount = useMemo(() => schedule.filter(m=>isDone(matchStates[m.id])).length, [schedule, matchStates]);
 
   const byTime = useMemo(() => {
     const map = {};
     filtered.forEach(m => { if (!map[m.startMin]) map[m.startMin]=[]; map[m.startMin].push(m); });
     return Object.entries(map).sort((a,b)=>+a[0]-+b[0]);
   }, [filtered]);
-
-  const koSepTime = useMemo(() => {
-    const koMatch = scheduleWithKO.find(m => m.isKO);
-    return koMatch ? koMatch.startMin : null;
-  }, [scheduleWithKO]);
 
   const byCourt = useMemo(() => {
     const map = {};
@@ -1022,10 +845,7 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
 
   const byGroup = useMemo(() => {
     const map = {};
-    filtered.forEach(m => {
-      if (m.isKO) return; // KO matches shown in timeline only, not By Group
-      const k=`${m.level}-${m.bracket}`; if (!map[k]) map[k]=[]; map[k].push(m);
-    });
+    filtered.forEach(m => { const k=`${m.level}-${m.bracket}`; if (!map[k]) map[k]=[]; map[k].push(m); });
     return map;
   }, [filtered]);
 
@@ -1057,7 +877,7 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
       {/* Stats bar */}
       <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:20}}>
         {[
-          {n:rrSchedule.length, label:"Total (RR)", color:C.pink},
+          {n:schedule.length, label:"Total",     color:C.pink},
           {n:doneCount,        label:"Done",      color:"#2ecc71"},
           {n:lateCount,        label:"After 10PM",color:lateCount>0?"#e74c3c":C.muted},
         ].map(({n,label,color}) => (
@@ -1092,40 +912,23 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
       </div>
 
       {/* Timeline */}
-      {viewMode==="time" && (() => {
-        let shownKOSep = false;
-        return byTime.map(([ms,matches]) => {
-          const mins=+ms, isLate=mins>=END_MINUTES;
-          const hasKO  = matches.some(m => m.isKO);
-          const showKOSep = hasKO && !shownKOSep;
-          if (hasKO) shownKOSep = true;
-          return (
-            <div key={ms}>
-              {showKOSep && (
-                <div style={{display:"flex",alignItems:"center",gap:12,margin:"28px 0 18px"}}>
-                  <div style={{flex:1,height:2,background:"linear-gradient(90deg,transparent,#ffd700)"}}/>
-                  <div style={{background:"rgba(255,215,0,0.12)",border:"1px solid rgba(255,215,0,0.45)",borderRadius:10,padding:"6px 20px",fontFamily:"'Fredoka One',sans-serif",fontSize:16,color:"#ffd700",letterSpacing:1,whiteSpace:"nowrap"}}>
-                    🏆 KNOCKOUT STAGE
-                  </div>
-                  <div style={{flex:1,height:2,background:"linear-gradient(90deg,#ffd700,transparent)"}}/>
-                </div>
-              )}
-              <div style={{marginBottom:20}}>
-                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-                  <div style={{background:hasKO?"rgba(255,215,0,0.1)":isLate?"rgba(231,76,60,0.2)":C.faint,border:`1px solid ${hasKO?"rgba(255,215,0,0.4)":isLate?"rgba(231,76,60,0.4)":C.border}`,borderRadius:8,padding:"5px 14px",fontFamily:"'Fredoka One',sans-serif",fontSize:16,color:hasKO?"#ffd700":isLate?"#e74c3c":C.pink,flexShrink:0}}>
-                    {minutesToTime(mins)}{isLate&&!hasKO?" ⚠️":""}
-                  </div>
-                  <div style={{flex:1,height:1,background:hasKO?"rgba(255,215,0,0.25)":C.border}}/>
-                  <span style={{color:C.muted,fontSize:11}}>{matches.length} match{matches.length!==1?"es":""}</span>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:10}}>
-                  {matches.map(m => <MatchCard key={m.id} match={m} matchState={matchStates[m.id]} onUpdate={u=>updateMatchState(m.id,u)} onReschedule={c=>rescheduleMatch(m.id,c)}/>)}
-                </div>
+      {viewMode==="time" && byTime.map(([ms,matches]) => {
+        const mins=+ms, isLate=mins>=END_MINUTES;
+        return (
+          <div key={ms} style={{marginBottom:20}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+              <div style={{background:isLate?"rgba(231,76,60,0.2)":C.faint,border:`1px solid ${isLate?"rgba(231,76,60,0.4)":C.border}`,borderRadius:8,padding:"5px 14px",fontFamily:"'Fredoka One',sans-serif",fontSize:16,color:isLate?"#e74c3c":C.pink,flexShrink:0}}>
+                {minutesToTime(mins)}{isLate?" ⚠️":""}
               </div>
+              <div style={{flex:1,height:1,background:C.border}}/>
+              <span style={{color:C.muted,fontSize:11}}>{matches.length} match{matches.length!==1?"es":""}</span>
             </div>
-          );
-        });
-      })()}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:10}}>
+              {matches.map(m => <MatchCard key={m.id} match={m} matchState={matchStates[m.id]} onUpdate={u=>updateMatchState(m.id,u)} onReschedule={c=>rescheduleMatch(m.id,c)}/>)}
+            </div>
+          </div>
+        );
+      })}
 
       {/* By Court */}
       {viewMode==="court" && (
@@ -1155,7 +958,7 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
       {viewMode==="group" && Object.entries(byGroup).sort(([a],[b])=>a.localeCompare(b)).map(([key,matches]) => {
         const [lvl,brk] = key.split("-");
         const lm = LEVEL_META[lvl]||LEVEL_META.E;
-        const bc = BKT_COLORS[((+brk-1)%BKT_COLORS.length+BKT_COLORS.length)%BKT_COLORS.length];
+        const bc = BKT_COLORS[(+brk-1)%BKT_COLORS.length];
         const done = matches.filter(m=>isDone(matchStates[m.id])).length;
         return (
           <div key={key} style={{marginBottom:24}}>
@@ -1219,7 +1022,7 @@ function ResultsView({ teams, schedule, matchStates, levels, brackets }) {
         {allKeys.map(key => {
           const [lvl,brk] = key.split("-");
           const lm = LEVEL_META[lvl]||LEVEL_META.E;
-          const bc = BKT_COLORS[((+brk-1)%BKT_COLORS.length+BKT_COLORS.length)%BKT_COLORS.length];
+          const bc = BKT_COLORS[(+brk-1)%BKT_COLORS.length];
           const ms = getMatches(key);
           const done = ms.filter(m=>isDone(matchStates[m.id])).length;
           return (
@@ -1295,11 +1098,11 @@ function ResultsView({ teams, schedule, matchStates, levels, brackets }) {
                     <span style={{color:C.muted,fontSize:11,alignSelf:"center"}}>{minutesToTime(m.startMin)}</span>
                   </div>
                   <div style={{flex:1,minWidth:160,display:"flex",flexWrap:"wrap",alignItems:"center",gap:6}}>
-                    <span style={{color:s.winner==="home"?C.pink:C.white,fontWeight:s.winner==="home"?700:400,fontSize:13}}>{s.winner==="home"&&"🏆 "}{teamLabel(m.home)}</span>
+                    <span style={{color:s.winner==="home"?C.pink:C.white,fontWeight:s.winner==="home"?700:400,fontSize:13}}>{s.winner==="home"&&"🏆 "}{m.home.player1} & {m.home.player2}</span>
                     {(s.scoreHome||s.scoreAway) && done && (
                       <span style={{background:`${C.pink}22`,border:`1px solid ${C.pink}44`,borderRadius:7,padding:"2px 12px",color:C.white,fontWeight:900,fontSize:16,fontFamily:"'Fredoka One',sans-serif"}}>{s.scoreHome||0} — {s.scoreAway||0}</span>
                     )}
-                    <span style={{color:s.winner==="away"?C.pink:C.white,fontWeight:s.winner==="away"?700:400,fontSize:13}}>{s.winner==="away"&&"🏆 "}{teamLabel(m.away)}</span>
+                    <span style={{color:s.winner==="away"?C.pink:C.white,fontWeight:s.winner==="away"?700:400,fontSize:13}}>{s.winner==="away"&&"🏆 "}{m.away.player1} & {m.away.player2}</span>
                   </div>
                   <span style={{color:statusColor,fontSize:11,fontWeight:600,marginLeft:"auto",flexShrink:0}}>{statusLabel}</span>
                 </div>
@@ -1345,7 +1148,7 @@ function KOMatchCard({ homeTeam, awayTeam, matchData, onUpdate, roundLabel, matc
         {/* Home */}
         <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:4}}>
           <div style={{flex:1, fontSize:12, color:winner==="home"?C.pink:homeTeam?C.white:C.muted, fontWeight:winner==="home"?700:400, lineHeight:1.3}}>
-            {winner==="home" && "🏆 "}{teamLabel(homeTeam)}
+            {winner==="home" && "🏆 "}{homeTeam ? `${homeTeam.player1} & ${homeTeam.player2}` : "TBD"}
           </div>
           <input type="number" min="0" max="99" value={scoreHome} disabled={!hasTeams}
             onChange={e=>onUpdate({scoreHome:e.target.value})}
@@ -1355,7 +1158,7 @@ function KOMatchCard({ homeTeam, awayTeam, matchData, onUpdate, roundLabel, matc
         {/* Away */}
         <div style={{display:"flex", alignItems:"center", gap:8, marginTop:4}}>
           <div style={{flex:1, fontSize:12, color:winner==="away"?C.pink:awayTeam?C.white:C.muted, fontWeight:winner==="away"?700:400, lineHeight:1.3}}>
-            {winner==="away" && "🏆 "}{teamLabel(awayTeam)}
+            {winner==="away" && "🏆 "}{awayTeam ? `${awayTeam.player1} & ${awayTeam.player2}` : "TBD"}
           </div>
           <input type="number" min="0" max="99" value={scoreAway} disabled={!hasTeams}
             onChange={e=>onUpdate({scoreAway:e.target.value})}
@@ -1367,7 +1170,7 @@ function KOMatchCard({ homeTeam, awayTeam, matchData, onUpdate, roundLabel, matc
             {[["home",homeTeam],["away",awayTeam]].map(([side,team]) => (
               <button key={side} onClick={()=>onUpdate({winner:winner===side?null:side})}
                 style={{flex:1, background:winner===side?`${C.pink}33`:"transparent", border:`1px solid ${winner===side?C.pink:C.border}`, borderRadius:7, padding:"4px 8px", color:winner===side?C.pink:C.muted, fontSize:11, cursor:"pointer", fontWeight:winner===side?700:400, transition:"all 0.15s"}}>
-                {teamShort(team)} wins 🐾
+                {team.player1.split(" ")[0]} wins 🐾
               </button>
             ))}
           </div>
@@ -1389,10 +1192,12 @@ function KOMatchCard({ homeTeam, awayTeam, matchData, onUpdate, roundLabel, matc
 }
 
 // ── Main KnockoutView ─────────────────────────────────
-function KnockoutView({ teams, schedule, matchStates, koData, setKoData, koFormats, setKoFormats }) {
+function KnockoutView({ teams, schedule, matchStates }) {
   const [selectedLevel, setSelectedLevel] = useState("B");
   // koFormats: { [level]: "final"|"sf"|"qf" }
-  // koFormats and koData come from App props
+  const [koFormats, setKoFormats] = useSharedState("koFormats", { B:"qf", C:"qf", D:"sf", E:"final" });
+  // koData: { [level]: { [matchKey]: { homeTeam, awayTeam, scoreHome, scoreAway, winner } } }
+  const [koData, setKoData] = useSharedState("koData", {});
   const [showSeedModal,  setShowSeedModal]  = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
   const [assignTarget, setAssignTarget] = useState(null); // { key, slot }
@@ -1750,7 +1555,7 @@ function SettingsView({ levels, setLevels, brackets, setBrackets, adminPin, setA
    role: null (not logged in) | "admin" | "player"
 ══════════════════════════════════════════════════════ */
 const ADMIN_PIN_KEY = "ps_admin_pin";
-const DEFAULT_PIN   = "03142026";
+const DEFAULT_PIN   = "1234";
 
 function LoginScreen({ onLogin }) {
   const [pin, setPin]       = useState("");
@@ -1822,7 +1627,7 @@ function LoginScreen({ onLogin }) {
    no reschedule, no winner buttons)
 ══════════════════════════════════════════════════════ */
 function PlayerMatchCard({ match, matchState }) {
-  const { home, away, court, startMin, level, bracket, isKO=false, koLabel="" } = match;
+  const { home, away, court, startMin, level, bracket } = match;
   const { scoreHome="", scoreAway="", winner=null, matchStatus="pending" } = matchState || {};
   const cc = COURT_COLORS[(court-1) % COURT_COLORS.length];
 
@@ -1844,10 +1649,7 @@ function PlayerMatchCard({ match, matchState }) {
         <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:10}}>
           <div style={{background:`${cc}33`,border:`1px solid ${cc}66`,borderRadius:7,padding:"2px 9px",fontFamily:"'Fredoka One',sans-serif",fontSize:13,color:cc,flexShrink:0}}>C{court}</div>
           <LevelBadge level={level}/>
-          {isKO
-            ? <span style={{background:"rgba(255,215,0,0.15)",color:"#ffd700",border:"1px solid rgba(255,215,0,0.4)",borderRadius:5,padding:"1px 9px",fontSize:11,fontWeight:900,letterSpacing:0.5,flexShrink:0}}>🏆 {koLabel}</span>
-            : <BktBadge bracket={bracket}/>
-          }
+          <BktBadge bracket={bracket}/>
           <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6}}>
             {matchStatus==="ongoing" && (
               <div style={{display:"flex",alignItems:"center",gap:4,background:"rgba(233,30,140,0.2)",border:`1px solid ${C.pink}66`,borderRadius:6,padding:"2px 8px"}}>
@@ -1863,14 +1665,14 @@ function PlayerMatchCard({ match, matchState }) {
         {/* Teams */}
         <div>
           <div style={{fontSize:13,fontWeight:winner==="home"?700:500,color:winner==="home"?C.pink:C.white}}>
-            {winner==="home" && "🏆 "}{teamLabel(home)}
+            {winner==="home" && "🏆 "}{home.player1} & {home.player2}
           </div>
           {(scoreHome!=="" && scoreAway!=="") && matchStatus==="done" && (
             <div style={{fontFamily:"'Fredoka One',sans-serif",fontSize:20,color:winner==="home"?C.pink:"#aaa",lineHeight:1.2}}>{scoreHome}</div>
           )}
           <div style={{fontSize:11,color:C.muted,margin:"4px 0"}}>vs</div>
           <div style={{fontSize:13,fontWeight:winner==="away"?700:500,color:winner==="away"?C.pink:C.white}}>
-            {winner==="away" && "🏆 "}{teamLabel(away)}
+            {winner==="away" && "🏆 "}{away.player1} & {away.player2}
           </div>
           {(scoreHome!=="" && scoreAway!=="") && matchStatus==="done" && (
             <div style={{fontFamily:"'Fredoka One',sans-serif",fontSize:20,color:winner==="away"?C.pink:"#aaa",lineHeight:1.2}}>{scoreAway}</div>
@@ -1881,34 +1683,19 @@ function PlayerMatchCard({ match, matchState }) {
   );
 }
 
-function PlayerView({ schedule, matchStates, koData={} }) {
+function PlayerView({ schedule, matchStates }) {
   const [filterLv, setFilterLv] = useState("ALL");
   const [filterCt, setFilterCt] = useState("ALL");
   const [search,   setSearch]   = useState("");
 
-  // Inject live KO team names same as ScheduleView
-  const scheduleWithKO = useMemo(() => schedule.map(m => {
-    if (!m || !m.isKO) return m;
-    const lvData = (koData && koData[m.level]) || {};
-    const koKey  = `${m.level}_${m.koRound || ""}`;
-    const slot   = lvData[koKey] || {};
-    const homeName = slot.homeTeam || "TBA";
-    const awayName = slot.awayTeam || "TBA";
-    return {
-      ...m,
-      home: { ...m.home, player1: homeName, player2: "", name: homeName },
-      away: { ...m.away, player1: awayName, player2: "", name: awayName },
-    };
-  }), [schedule, koData]);
-
   const getStatus = m => (matchStates[m.id]?.matchStatus) || "pending";
 
   const ongoingMatches = useMemo(() =>
-    scheduleWithKO.filter(m => getStatus(m) === "ongoing"),
-    [scheduleWithKO, matchStates]);
+    schedule.filter(m => getStatus(m) === "ongoing"),
+    [schedule, matchStates]);
 
   const filtered = useMemo(() =>
-    scheduleWithKO.filter(m =>
+    schedule.filter(m =>
       (filterLv==="ALL" || m.level===filterLv) &&
       (filterCt==="ALL" || m.court===Number(filterCt)) &&
       (!search || [m.home.player1,m.home.player2,m.away.player1,m.away.player2]
@@ -1920,11 +1707,6 @@ function PlayerView({ schedule, matchStates, koData={} }) {
     filtered.forEach(m => { if (!map[m.startMin]) map[m.startMin]=[]; map[m.startMin].push(m); });
     return Object.entries(map).sort((a,b)=>+a[0]-+b[0]);
   }, [filtered]);
-
-  const koSepTime = useMemo(() => {
-    const koMatch = scheduleWithKO.find(m => m.isKO);
-    return koMatch ? koMatch.startMin : null;
-  }, [scheduleWithKO]);
 
   const doneCount    = useMemo(() => schedule.filter(m => getStatus(m)==="done").length,    [schedule, matchStates]);
   const pendingCount = useMemo(() => schedule.filter(m => getStatus(m)==="pending").length,  [schedule, matchStates]);
@@ -1997,47 +1779,30 @@ function PlayerView({ schedule, matchStates, koData={} }) {
       </div>
 
       {/* ── Timeline ── */}
-      {(() => {
-        let shownKOSep = false;
-        return byTime.map(([ms,matches]) => {
-          const mins      = +ms;
-          const isLate    = mins >= END_MINUTES;
-          const hasKO     = matches.some(m => m.isKO);
-          const slotLive  = matches.some(m => (matchStates[m.id]?.matchStatus)==="ongoing");
-          const slotDone  = matches.every(m => (matchStates[m.id]?.matchStatus)==="done");
-          const slotColor = hasKO ? "#ffd700" : slotLive ? C.pink : slotDone ? "#2ecc71" : isLate ? "#e74c3c" : C.muted;
-          const showKOSep = hasKO && !shownKOSep;
-          if (hasKO) shownKOSep = true;
-          return (
-            <div key={ms}>
-              {showKOSep && (
-                <div style={{display:"flex",alignItems:"center",gap:12,margin:"28px 0 18px"}}>
-                  <div style={{flex:1,height:2,background:"linear-gradient(90deg,transparent,#ffd700)"}}/>
-                  <div style={{background:"rgba(255,215,0,0.12)",border:"1px solid rgba(255,215,0,0.45)",borderRadius:10,padding:"6px 20px",fontFamily:"'Fredoka One',sans-serif",fontSize:16,color:"#ffd700",letterSpacing:1,whiteSpace:"nowrap"}}>
-                    🏆 KNOCKOUT STAGE
-                  </div>
-                  <div style={{flex:1,height:2,background:"linear-gradient(90deg,#ffd700,transparent)"}}/>
-                </div>
-              )}
-              <div style={{marginBottom:24}}>
-                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-                  <div style={{background:hasKO?"rgba(255,215,0,0.1)":slotLive?`${C.pink}22`:slotDone?"rgba(46,204,113,0.1)":C.faint,border:`1px solid ${slotColor}55`,borderRadius:8,padding:"5px 14px",fontFamily:"'Fredoka One',sans-serif",fontSize:16,color:slotColor,flexShrink:0,display:"flex",alignItems:"center",gap:8}}>
-                    {slotLive && !hasKO && <div style={{width:7,height:7,borderRadius:"50%",background:C.pink,animation:"pulse 1s infinite"}}/>}
-                    {minutesToTime(mins)}{isLate&&!hasKO?" ⚠️":""}
-                  </div>
-                  <div style={{flex:1,height:1,background:hasKO?"rgba(255,215,0,0.3)":slotLive?`${C.pink}44`:C.border}}/>
-                  <span style={{color:slotColor,fontSize:11,fontWeight:slotLive||hasKO?700:400}}>
-                    {slotLive?"🔴 Ongoing":slotDone?"✅ Done":`${matches.length} match${matches.length!==1?"es":""}`}
-                  </span>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:10}}>
-                  {matches.map(m=><PlayerMatchCard key={m.id} match={m} matchState={matchStates[m.id]}/>)}
-                </div>
+      {byTime.map(([ms,matches]) => {
+        const mins      = +ms;
+        const isLate    = mins >= END_MINUTES;
+        const slotLive  = matches.some(m => (matchStates[m.id]?.matchStatus)==="ongoing");
+        const slotDone  = matches.every(m => (matchStates[m.id]?.matchStatus)==="done");
+        const slotColor = slotLive ? C.pink : slotDone ? "#2ecc71" : isLate ? "#e74c3c" : C.muted;
+        return (
+          <div key={ms} style={{marginBottom:24}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+              <div style={{background:slotLive?`${C.pink}22`:slotDone?"rgba(46,204,113,0.1)":C.faint,border:`1px solid ${slotColor}55`,borderRadius:8,padding:"5px 14px",fontFamily:"'Fredoka One',sans-serif",fontSize:16,color:slotColor,flexShrink:0,display:"flex",alignItems:"center",gap:8}}>
+                {slotLive && <div style={{width:7,height:7,borderRadius:"50%",background:C.pink,animation:"pulse 1s infinite"}}/>}
+                {minutesToTime(mins)}{isLate?" ⚠️":""}
               </div>
+              <div style={{flex:1,height:1,background:slotLive?`${C.pink}44`:C.border}}/>
+              <span style={{color:slotColor,fontSize:11,fontWeight:slotLive?700:400}}>
+                {slotLive?"🔴 Ongoing":slotDone?"✅ Done":`${matches.length} match${matches.length!==1?"es":""}`}
+              </span>
             </div>
-          );
-        });
-      })()}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:10}}>
+              {matches.map(m=><PlayerMatchCard key={m.id} match={m} matchState={matchStates[m.id]}/>)}
+            </div>
+          </div>
+        );
+      })}
 
       {filtered.length===0 && search && (
         <div style={{textAlign:"center",padding:"40px 20px"}}>
@@ -2097,26 +1862,17 @@ function App() {
   // ── Shared Firebase data ──
   const [teams,           setTeams]           = useSharedState("teams", INITIAL_TEAMS);
   const [scheduleVersion, setScheduleVersion] = useSharedState("scheduleVersion", "");
-  // If stored schedule is from an old version, start fresh immediately (before first render)
-  const [schedule,        setSchedule]        = useSharedState("schedule",
-    (() => {
-      try {
-        const sv = localStorage.getItem("ps_scheduleVersion");
-        const ver = sv ? JSON.parse(sv) : "";
-        if (ver !== SCHEDULE_VERSION) return [];
-        const s = localStorage.getItem("ps_schedule");
-        return s ? JSON.parse(s) : [];
-      } catch { return []; }
-    })()
-  );
+  const [schedule,        setSchedule]        = useSharedState("schedule", []);
   const [matchStates,     setMatchStates]      = useSharedState("matchStates", {});
-  const [koData,          setKoData]          = useSharedState("koData", {});
-  const [koFormats,       setKoFormats]       = useSharedState("koFormats", { B:"sf", C:"qf", D:"sf", E:"sf" });
 
-  // ── Clear stale schedule on version mismatch (init only, not reactive) ──
-  // NOTE: Reactive clearing was removed because Firebase snapshots can echo back
-  // the old scheduleVersion after a regenerate, causing the new schedule to disappear.
-  // Stale data is cleared synchronously in the useState initializer above instead.
+  // ── Clear stale schedule on version mismatch ──
+  useEffect(() => {
+    if (scheduleVersion !== "" && scheduleVersion !== SCHEDULE_VERSION) {
+      setSchedule([]);
+      setMatchStates({});
+      setScheduleVersion(SCHEDULE_VERSION);
+    }
+  }, [scheduleVersion]);
 
   // ── If URL forces a role but state drifted, correct it ──
   useEffect(() => {
@@ -2178,7 +1934,7 @@ function App() {
             </div>
           </div>
           <div style={{maxWidth:1000,margin:"0 auto",padding:"28px 16px"}}>
-            <PlayerView schedule={schedule} matchStates={matchStates} koData={koData}/>
+            <PlayerView schedule={schedule} matchStates={matchStates}/>
           </div>
         </div>
       </div>
@@ -2202,7 +1958,7 @@ function App() {
                   {[
                     {n:teams.length,    label:"PAIRS",   color:C.pink},
                     {n:doneCount,       label:"DONE",    color:"#2ecc71"},
-                    {n:schedule.filter(m=>!m.isKO).length, label:"MATCHES", color:"#f472b6"},
+                    {n:schedule.length, label:"MATCHES", color:"#f472b6"},
                   ].map(({n,label,color}) => (
                     <div key={label} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"6px 14px",textAlign:"center"}}>
                       <div style={{fontFamily:"'Fredoka One',sans-serif",fontSize:22,color,lineHeight:1}}>{n}</div>
@@ -2234,9 +1990,9 @@ function App() {
           <div style={{maxWidth:1000,margin:"0 auto",padding:"28px 16px"}}>
             {tab==="teams"    && <TeamsView    teams={teams} setTeams={setTeams} levels={levels} brackets={brackets} setModal={setModal} setEditTeam={setEditTeam}/>}
             {tab==="brackets" && <BracketView  teams={teams} levels={levels} brackets={brackets}/>}
-            {tab==="schedule" && <ScheduleView teams={teams} schedule={schedule} setSchedule={setSchedule} matchStates={matchStates} setMatchStates={setMatchStates} updateMatchState={updateMatchState} setScheduleVersion={setScheduleVersion} koData={koData}/>}
+            {tab==="schedule" && <ScheduleView teams={teams} schedule={schedule} setSchedule={setSchedule} matchStates={matchStates} setMatchStates={setMatchStates} updateMatchState={updateMatchState} setScheduleVersion={setScheduleVersion}/>}
             {tab==="results"  && <ResultsView  teams={teams} schedule={schedule} matchStates={matchStates} levels={levels} brackets={brackets}/>}
-            {tab==="knockout" && <KnockoutView teams={teams} schedule={schedule} matchStates={matchStates} koData={koData} setKoData={setKoData} koFormats={koFormats} setKoFormats={setKoFormats}/>}
+            {tab==="knockout" && <KnockoutView teams={teams} schedule={schedule} matchStates={matchStates}/>}
             {tab==="settings" && <SettingsView levels={levels} setLevels={setLevels} brackets={brackets} setBrackets={setBrackets} adminPin={adminPin} setAdminPin={setAdminPin} onLogout={()=>setRole(null)}/>}
           </div>
 
@@ -2250,9 +2006,7 @@ function App() {
   );
 }
 
-    ReactDOM.createRoot(document.getElementById("root")).render(
-  React.createElement(ErrorBoundary, null, React.createElement(App))
-);
+    ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
   </script>
 </body>
 </html>
