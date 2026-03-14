@@ -972,7 +972,7 @@ const k=`${m.level}-${m.bracket}`; if (!map[k]) map[k]=[]; map[k].push(m);
       {/* By Court — all 7 courts side by side, horizontally scrollable */}
       {viewMode==="court" && (
         <div style={{overflowX:"auto",paddingBottom:8}}>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(220px,1fr))",gap:10,minWidth:1580}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(220px,1fr))",gap:10,minWidth:1600}}>
             {[1,2,3,4,5,6,7].map(court => {
               const matches = byCourt[court] || [];
               const cc = COURT_COLORS[(court-1)%COURT_COLORS.length];
@@ -1965,7 +1965,7 @@ function App() {
         <PawBg/>
         <div style={{position:"relative",zIndex:1}}>
           <div style={{background:`linear-gradient(180deg,${C.surface} 0%,${C.bg} 100%)`,borderBottom:`1px solid ${C.border}`,position:"sticky",top:0,zIndex:100}}>
-            <div style={{maxWidth:1000,margin:"0 auto",padding:"16px 20px"}}>
+            <div style={{maxWidth:1600,margin:"0 auto",padding:"16px 20px"}}>
               <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
                 <PawSmashLogo/>
                 <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10}}>
@@ -1982,7 +1982,7 @@ function App() {
               </div>
             </div>
           </div>
-          <div style={{maxWidth:1000,margin:"0 auto",padding:"28px 16px"}}>
+          <div style={{maxWidth:1600,margin:"0 auto",padding:"28px 16px"}}>
             <PlayerView schedule={schedule} matchStates={matchStates}/>
           </div>
         </div>
@@ -2000,7 +2000,7 @@ function App() {
 
           {/* ── Sticky header ── */}
           <div style={{background:`linear-gradient(180deg,${C.surface} 0%,${C.bg} 100%)`,borderBottom:`1px solid ${C.border}`,position:"sticky",top:0,zIndex:100}}>
-            <div style={{maxWidth:1000,margin:"0 auto",padding:"16px 20px 0"}}>
+            <div style={{maxWidth:1600,margin:"0 auto",padding:"16px 20px 0"}}>
               <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:16,flexWrap:"wrap"}}>
                 <PawSmashLogo/>
                 <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
@@ -2036,7 +2036,7 @@ function App() {
           </div>
 
           {/* ── Tab content ── */}
-          <div style={{maxWidth:1000,margin:"0 auto",padding:"28px 16px"}}>
+          <div style={{maxWidth:1600,margin:"0 auto",padding:"28px 16px"}}>
             {tab==="teams"    && <TeamsView    teams={teams} setTeams={setTeams} levels={levels} brackets={brackets} setModal={setModal} setEditTeam={setEditTeam}/>}
             {tab==="brackets" && <BracketView  teams={teams} levels={levels} brackets={brackets}/>}
             {tab==="schedule" && <ScheduleView teams={teams} schedule={schedule} setSchedule={setSchedule} matchStates={matchStates} setMatchStates={setMatchStates} updateMatchState={updateMatchState} setScheduleVersion={setScheduleVersion}/>}
