@@ -1594,7 +1594,7 @@ function SettingsView({ levels, setLevels, brackets, setBrackets, adminPin, setA
    role: null (not logged in) | "admin" | "player"
 ══════════════════════════════════════════════════════ */
 const ADMIN_PIN_KEY = "ps_admin_pin";
-const DEFAULT_PIN   = "03142026";
+const DEFAULT_PIN   = "03152026";
 
 function LoginScreen({ onLogin }) {
   const [pin, setPin]       = useState("");
@@ -1905,24 +1905,10 @@ function App() {
   // ── Shared Firebase data ──
   const [teams,           setTeams]           = useSharedState("teams", INITIAL_TEAMS);
   const [scheduleVersion, setScheduleVersion] = useSharedState("scheduleVersion", "");
-  // If stored schedule is from an old version, start fresh immediately (before first render)
-  const [schedule,        setSchedule]        = useSharedState("schedule",
-    (() => {
-      try {
-        const sv = localStorage.getItem("ps_scheduleVersion");
-        const ver = sv ? JSON.parse(sv) : "";
-        if (ver !== SCHEDULE_VERSION) return [];
-        const s = localStorage.getItem("ps_schedule");
-        return s ? JSON.parse(s) : [];
-      } catch { return []; }
-    })()
-  );
+  const [schedule,        setSchedule]        = useSharedState("schedule", []);
   const [matchStates,     setMatchStates]      = useSharedState("matchStates", {});
 
-  // ── Clear stale schedule on version mismatch (init only, not reactive) ──
-  // NOTE: Reactive clearing was removed because Firebase snapshots can echo back
-  // the old scheduleVersion after a regenerate, causing the new schedule to disappear.
-  // Stale data is cleared synchronously in the useState initializer above instead.
+
 
   // ── If URL forces a role but state drifted, correct it ──
   useEffect(() => {
