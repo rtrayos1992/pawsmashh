@@ -141,9 +141,9 @@ async function saveField(field, value) {
   try {
     const ref = getTournamentRef();
     if (!ref) return;
-    _lockField(field);
+    // No lock — normal saves must reach all listeners (admin & player view) immediately
     await ref.set({ [field]: value }, { merge: true });
-  } catch(e) { console.error("❌ Save failed:", field, e.code, e.message); }
+  } catch(e) {}
 }
 // Write multiple fields atomically and lock all of them
 async function saveFields(obj) {
