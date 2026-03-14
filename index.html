@@ -871,8 +871,6 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
     return Object.entries(map).sort((a,b)=>+a[0]-+b[0]);
   }, [filtered]);
 
-    
-    return koMatch ? koMatch.startMin : null;
 
   const byCourt = useMemo(() => {
     const map = {};
@@ -1594,7 +1592,7 @@ function SettingsView({ levels, setLevels, brackets, setBrackets, adminPin, setA
    role: null (not logged in) | "admin" | "player"
 ══════════════════════════════════════════════════════ */
 const ADMIN_PIN_KEY = "ps_admin_pin";
-const DEFAULT_PIN   = "03152026";
+const DEFAULT_PIN   = "03142026";
 
 function LoginScreen({ onLogin }) {
   const [pin, setPin]       = useState("");
@@ -1748,8 +1746,6 @@ function PlayerView({ schedule, matchStates }) {
     return Object.entries(map).sort((a,b)=>+a[0]-+b[0]);
   }, [filtered]);
 
-    
-    return koMatch ? koMatch.startMin : null;
 
   const doneCount    = useMemo(() => schedule.filter(m => getStatus(m)==="done").length,    [schedule, matchStates]);
   const pendingCount = useMemo(() => schedule.filter(m => getStatus(m)==="pending").length,  [schedule, matchStates]);
