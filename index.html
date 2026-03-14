@@ -726,7 +726,7 @@ function MatchCard({ match, matchState, onUpdate, onReschedule }) {
   };
   const cfg = STATUS_CFG[matchStatus] || STATUS_CFG.pending;
   const smallSel = { ...SEL, width:"auto", padding:"5px 10px", fontSize:12 };
-  const numInput = { width:46, background:"rgba(233,30,140,0.12)", border:`1px solid ${C.border}`, borderRadius:7, padding:"5px 4px", color:C.white, fontSize:17, fontWeight:800, textAlign:"center", outline:"none", fontFamily:"'Fredoka One',sans-serif" };
+  const numInput = { width:42, background:"rgba(233,30,140,0.12)", border:`1px solid ${C.border}`, borderRadius:7, padding:"5px 4px", color:C.white, fontSize:17, fontWeight:800, textAlign:"center", outline:"none", fontFamily:"'Fredoka One',sans-serif" };
 
   return (
     <div style={{background:cfg.bg,border:`1px solid ${cfg.color}44`,borderRadius:12,padding:"12px 14px",transition:"all 0.2s"}}>
@@ -962,7 +962,7 @@ const k=`${m.level}-${m.bracket}`; if (!map[k]) map[k]=[]; map[k].push(m);
               <div style={{flex:1,height:1,background:C.border}}/>
               <span style={{color:C.muted,fontSize:11}}>{matches.length} match{matches.length!==1?"es":""}</span>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:10}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:10}}>
               {matches.map(m => <MatchCard key={m.id} match={m} matchState={matchStates[m.id]} onUpdate={u=>updateMatchState(m.id,u)} onReschedule={c=>rescheduleMatch(m.id,c)}/>)}
             </div>
           </div>
@@ -971,8 +971,8 @@ const k=`${m.level}-${m.bracket}`; if (!map[k]) map[k]=[]; map[k].push(m);
 
       {/* By Court — all 7 courts side by side, horizontally scrollable */}
       {viewMode==="court" && (
-        <div style={{overflowX:"auto",paddingBottom:8}}>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(220px,1fr))",gap:10,minWidth:1600}}>
+        <div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:8}}>
             {[1,2,3,4,5,6,7].map(court => {
               const matches = byCourt[court] || [];
               const cc = COURT_COLORS[(court-1)%COURT_COLORS.length];
@@ -1023,7 +1023,7 @@ const k=`${m.level}-${m.bracket}`; if (!map[k]) map[k]=[]; map[k].push(m);
               <span style={{background:`${bc}33`,color:bc,border:`1px solid ${bc}66`,borderRadius:7,padding:"4px 14px",fontWeight:800,fontSize:14}}>Bracket {brk}</span>
               <span style={{color:done===matches.length&&matches.length>0?"#2ecc71":C.muted,fontSize:12,fontWeight:700}}>{done}/{matches.length} done</span>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:10}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:10}}>
               {matches.map(m => <MatchCard key={m.id} match={m} matchState={matchStates[m.id]} onUpdate={u=>updateMatchState(m.id,u)} onReschedule={c=>rescheduleMatch(m.id,c)}/>)}
             </div>
           </div>
@@ -1442,8 +1442,8 @@ function KnockoutView({ teams, schedule, matchStates }) {
       </div>
 
       {/* Bracket columns */}
-      <div style={{overflowX:"auto"}}>
-        <div style={{display:"grid", gridTemplateColumns:`repeat(${fmt.rounds.length}, 1fr)`, gap:20, minWidth: fmt.rounds.length * 260}}>
+      <div>
+        <div style={{display:"grid", gridTemplateColumns:`repeat(${fmt.rounds.length}, 1fr)`, gap:20}}>
           {fmt.rounds.map(round => renderRound(round))}
         </div>
       </div>
@@ -1965,7 +1965,7 @@ function App() {
         <PawBg/>
         <div style={{position:"relative",zIndex:1}}>
           <div style={{background:`linear-gradient(180deg,${C.surface} 0%,${C.bg} 100%)`,borderBottom:`1px solid ${C.border}`,position:"sticky",top:0,zIndex:100}}>
-            <div style={{maxWidth:1600,margin:"0 auto",padding:"16px 20px"}}>
+            <div style={{padding:"16px 20px"}}>
               <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
                 <PawSmashLogo/>
                 <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10}}>
@@ -1982,7 +1982,7 @@ function App() {
               </div>
             </div>
           </div>
-          <div style={{maxWidth:1600,margin:"0 auto",padding:"28px 16px"}}>
+          <div style={{padding:"28px 16px"}}>
             <PlayerView schedule={schedule} matchStates={matchStates}/>
           </div>
         </div>
@@ -2000,7 +2000,7 @@ function App() {
 
           {/* ── Sticky header ── */}
           <div style={{background:`linear-gradient(180deg,${C.surface} 0%,${C.bg} 100%)`,borderBottom:`1px solid ${C.border}`,position:"sticky",top:0,zIndex:100}}>
-            <div style={{maxWidth:1600,margin:"0 auto",padding:"16px 20px 0"}}>
+            <div style={{padding:"16px 20px 0"}}>
               <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:16,flexWrap:"wrap"}}>
                 <PawSmashLogo/>
                 <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
@@ -2024,7 +2024,7 @@ function App() {
                 </div>
               </div>
               <div style={{height:1,background:`linear-gradient(90deg,transparent,${C.pink}66,transparent)`}}/>
-              <div style={{display:"flex",overflowX:"auto"}}>
+              <div style={{display:"flex",flexWrap:"wrap"}}>
                 {TABS.map(t => (
                   <button key={t.id} onClick={()=>setTab(t.id)}
                     style={{background:"none",border:"none",borderBottom:`3px solid ${tab===t.id?C.pink:"transparent"}`,color:tab===t.id?C.white:C.muted,fontFamily:"'DM Sans',sans-serif",fontWeight:tab===t.id?700:500,fontSize:13,padding:"10px 16px",cursor:"pointer",whiteSpace:"nowrap",transition:"all 0.2s"}}>
@@ -2036,7 +2036,7 @@ function App() {
           </div>
 
           {/* ── Tab content ── */}
-          <div style={{maxWidth:1600,margin:"0 auto",padding:"28px 16px"}}>
+          <div style={{padding:"28px 16px"}}>
             {tab==="teams"    && <TeamsView    teams={teams} setTeams={setTeams} levels={levels} brackets={brackets} setModal={setModal} setEditTeam={setEditTeam}/>}
             {tab==="brackets" && <BracketView  teams={teams} levels={levels} brackets={brackets}/>}
             {tab==="schedule" && <ScheduleView teams={teams} schedule={schedule} setSchedule={setSchedule} matchStates={matchStates} setMatchStates={setMatchStates} updateMatchState={updateMatchState} setScheduleVersion={setScheduleVersion}/>}
