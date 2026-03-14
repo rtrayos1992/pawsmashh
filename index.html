@@ -893,10 +893,10 @@ const k=`${m.level}-${m.bracket}`; if (!map[k]) map[k]=[]; map[k].push(m);
       <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:24,marginBottom:24}}>
         <div style={{fontFamily:"'Fredoka One',sans-serif",fontSize:20,color:C.white,marginBottom:16}}>🏟️ Venue Layout</div>
         {[
-          {c:"Courts 1 & 2", l:"Level E — Beginner",      col:"#e91e8c", n:"5:00 PM"},
-          {c:"Courts 3 & 4", l:"Level D — Intermediate",  col:"#cd7f32", n:"5:00 PM"},
-          {c:"Courts 5,6 & 7",l:"Level C — Advanced",     col:"#ccc",    n:"5:00 PM"},
-          {c:"All Courts",   l:"Level B — Elite",          col:"#FFA500", n:"After E/D free up"},
+          {c:"Courts 1 & 2",   l:"Level E — Beginner",      col:"#e91e8c", n:"5:00 PM"},
+          {c:"Courts 3 & 4",   l:"Level D — Intermediate",  col:"#cd7f32", n:"5:00 PM"},
+          {c:"Courts 5, 6 & 7",l:"Level C — Advanced",     col:"#ccc",    n:"5:00 PM"},
+          {c:"All 7 Courts",   l:"Level B — Elite",         col:"#FFA500", n:"After E/D/C finish"},
         ].map(r => (
           <div key={r.c} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${C.faint}`}}>
             <div style={{width:10,height:10,borderRadius:"50%",background:r.col,flexShrink:0}}/>
@@ -969,27 +969,44 @@ const k=`${m.level}-${m.bracket}`; if (!map[k]) map[k]=[]; map[k].push(m);
         );
       })}
 
-      {/* By Court */}
+      {/* By Court — all 7 courts side by side, horizontally scrollable */}
       {viewMode==="court" && (
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:16}}>
-          {Object.entries(byCourt).filter(([,ms])=>ms.length>0).map(([cs,matches]) => {
-            const court=+cs, cc=COURT_COLORS[(court-1)%COURT_COLORS.length];
-            return (
-              <div key={court} style={{background:C.card,border:`2px solid ${cc}44`,borderRadius:16,overflow:"hidden"}}>
-                <div style={{background:`${cc}22`,padding:"12px 16px",display:"flex",alignItems:"center",gap:10,borderBottom:`1px solid ${cc}33`}}>
-                  <div style={{background:cc,borderRadius:8,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Fredoka One',sans-serif",fontSize:18,color:"#fff",flexShrink:0}}>{court}</div>
-                  <div>
-                    <div style={{fontFamily:"'Fredoka One',sans-serif",fontSize:16,color:C.white}}>COURT {court}</div>
-                    <div style={{fontSize:11,color:C.muted}}>{matches.length} matches · ends {minutesToTime(matches[matches.length-1].endMin)}</div>
+        <div style={{overflowX:"auto",paddingBottom:8}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(220px,1fr))",gap:10,minWidth:1580}}>
+            {[1,2,3,4,5,6,7].map(court => {
+              const matches = byCourt[court] || [];
+              const cc = COURT_COLORS[(court-1)%COURT_COLORS.length];
+              const primary = court<=2?"E":court<=4?"D":"C/B";
+              const doneC = matches.filter(m=>isDone(matchStates[m.id])).length;
+              return (
+                <div key={court} style={{background:C.card,border:`2px solid ${cc}44`,borderRadius:14,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+                  {/* Court header */}
+                  <div style={{background:`${cc}22`,padding:"10px 12px",borderBottom:`1px solid ${cc}33`,flexShrink:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{background:cc,borderRadius:7,width:30,height:30,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Fredoka One',sans-serif",fontSize:16,color:"#fff",flexShrink:0}}>{court}</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontFamily:"'Fredoka One',sans-serif",fontSize:13,color:C.white,letterSpacing:1}}>COURT {court}</div>
+                        <div style={{fontSize:10,color:cc,fontWeight:700}}>{primary} primary</div>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:6,marginTop:8,fontSize:10,color:C.muted}}>
+                      <span>{matches.length} matches</span>
+                      <span>·</span>
+                      <span style={{color:"#2ecc71"}}>{doneC} done</span>
+                      {matches.length>0 && <><span>·</span><span>ends {minutesToTime(matches[matches.length-1].endMin)}</span></>}
+                    </div>
                   </div>
-                  <div style={{marginLeft:"auto",fontSize:10,color:cc,fontWeight:700}}>{court<=2?"E":court<=4?"D":"C"} primary</div>
+                  {/* Matches */}
+                  <div style={{padding:8,display:"flex",flexDirection:"column",gap:6,flex:1,overflowY:"auto",maxHeight:"calc(100vh - 260px)"}}>
+                    {matches.length===0
+                      ? <div style={{color:C.muted,fontSize:11,textAlign:"center",padding:"20px 0"}}>No matches</div>
+                      : matches.map(m => <MatchCard key={m.id} match={m} matchState={matchStates[m.id]} onUpdate={u=>updateMatchState(m.id,u)} onReschedule={c=>rescheduleMatch(m.id,c)}/>)
+                    }
+                  </div>
                 </div>
-                <div style={{padding:12,display:"flex",flexDirection:"column",gap:8}}>
-                  {matches.map(m => <MatchCard key={m.id} match={m} matchState={matchStates[m.id]} onUpdate={u=>updateMatchState(m.id,u)} onReschedule={c=>rescheduleMatch(m.id,c)}/>)}
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 
