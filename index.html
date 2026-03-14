@@ -80,7 +80,7 @@ function minutesToTime(m) {
 function uid() { return Math.random().toString(36).substr(2,9); }
 
 // Bump this whenever the schedule algorithm changes — clears stale localStorage
-const SCHEDULE_VERSION = "v4";
+const SCHEDULE_VERSION = "v9";
 
 // ── localStorage (device-local only: role, PIN, firebase config) ──────
 function useLocalStorage(key, initial) {
@@ -110,11 +110,18 @@ function getTournamentRef() {
   catch(e) { console.error("❌ Firestore ref error:", e); return null; }
 }
 const _listeners = {};
-let   _docData   = null;
+let   _docData       = null;
+// Fields we recently wrote locally — ignore Firebase echoes for these for 5s
+const _localWrites   = {};
+function _lockField(field, ms=5000) { _localWrites[field] = Date.now() + ms; }
+function _isLocked(field) { return (_localWrites[field] || 0) > Date.now(); }
+
 function _notify(data) {
-  _docData = data;
+  _docData = { ...(_docData||{}), ...data };
   Object.keys(_listeners).forEach(field => {
-    if (field in data) _listeners[field].forEach(fn => fn(data[field]));
+    if (field in data && !_isLocked(field)) {
+      _listeners[field].forEach(fn => fn(data[field]));
+    }
   });
 }
 let _unsubscribe = null;
@@ -124,7 +131,6 @@ function _ensureListening() {
   if (!ref) { console.error("❌ No ref — cannot listen"); return; }
   console.log("🔥 Starting onSnapshot listener...");
   _unsubscribe = ref.onSnapshot(snap => {
-    console.log("📡 Snapshot received — fields:", snap.exists ? Object.keys(snap.data()) : "empty");
     if (snap && snap.exists) _notify(snap.data());
   }, err => {
     console.error("❌ onSnapshot error:", err.code, err.message);
@@ -135,8 +141,18 @@ async function saveField(field, value) {
   try {
     const ref = getTournamentRef();
     if (!ref) return;
+    _lockField(field);
     await ref.set({ [field]: value }, { merge: true });
   } catch(e) { console.error("❌ Save failed:", field, e.code, e.message); }
+}
+// Write multiple fields atomically and lock all of them
+async function saveFields(obj) {
+  try {
+    const ref = getTournamentRef();
+    if (!ref) return;
+    Object.keys(obj).forEach(f => _lockField(f));
+    await ref.set(obj, { merge: true });
+  } catch(e) { console.error("❌ saveFields failed:", e.code, e.message); }
 }
 function useSharedState(field, initial) {
   const lsKey = `ps_${field}`;
@@ -210,22 +226,22 @@ function buildSchedule(teams) {
   // ── Core scheduler ─────────────────────────────────────────────────
   // playerFree is shared across ALL levels so cross-level players
   // (who appear in e.g. both Level B and Level C) also get rest gaps.
-  function assignWithRest(matchList, courts, playerFree) {
+  // courtStart: earliest time any court can be used (default START_MINUTES)
+  function assignWithRest(matchList, courts, playerFree, courtStart = START_MINUTES) {
     const courtFree = {};
-    courts.forEach(c => { courtFree[c] = START_MINUTES; });
+    courts.forEach(c => { courtFree[c] = courtStart; });
     const pending = [...matchList];
 
     while (pending.length) {
       let bestIdx = 0, bestStart = Infinity, bestCourt = courts[0];
 
       pending.forEach((m, i) => {
-        // Use BOTH team-id and player-name keys so cross-level conflicts are caught
         const keys = [
           m.home.id, m.away.id,
           playerKey(m.home.player1), playerKey(m.home.player2),
           playerKey(m.away.player1), playerKey(m.away.player2),
         ];
-        const teamEarliest = Math.max(...keys.map(k => playerFree[k] || START_MINUTES));
+        const teamEarliest = Math.max(...keys.map(k => playerFree[k] || courtStart));
         courts.forEach(c => {
           const s = Math.max(courtFree[c], teamEarliest);
           if (s < bestStart) { bestStart=s; bestIdx=i; bestCourt=c; }
@@ -236,8 +252,7 @@ function buildSchedule(teams) {
       const s = bestStart;
       const e = s + MATCH_DURATION;
       courtFree[bestCourt] = e;
-      const restUntil = e + MATCH_DURATION; // 1-match gap
-      // Mark all player keys so cross-level conflicts are prevented
+      const restUntil = e + MATCH_DURATION;
       [
         m.home.id, m.away.id,
         playerKey(m.home.player1), playerKey(m.home.player2),
@@ -276,13 +291,13 @@ function buildSchedule(teams) {
   // won't be scheduled into any court slot before E/D/C finish
   const bKeys = Object.keys(groups).filter(k => k.startsWith("B"));
   if (bKeys.length) {
-    // Reset court availability to lastEDCEnd for Level B scheduling
+    // Level B courts open only at lastEDCEnd — passed as courtStart
+    // Also push any cross-level player rest times forward to lastEDCEnd
     const bPlayerFree = {};
-    // Carry over cross-level player rest times (in case B players also played in C etc.)
     Object.keys(playerFree).forEach(k => {
       bPlayerFree[k] = Math.max(playerFree[k] || START_MINUTES, lastEDCEnd);
     });
-    assignWithRest(interleave(bKeys), [1,2,3,4,5,6,7], bPlayerFree);
+    assignWithRest(interleave(bKeys), [1,2,3,4,5,6,7], bPlayerFree, lastEDCEnd);
   }
 
   return out;
@@ -819,21 +834,27 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
 
   const generate = () => {
     if (!schedule.length) {
-      setSchedule(buildSchedule(teams));
+      const s = buildSchedule(teams);
+      setSchedule(s);
       setScheduleVersion(SCHEDULE_VERSION);
+      setMatchStates({});
+      saveFields({ schedule: s, scheduleVersion: SCHEDULE_VERSION, matchStates: {} });
     }
   };
 
   const regenerate = () => {
-    setSchedule(buildSchedule(teams));
+    const s = buildSchedule(teams);
+    setSchedule(s);
     setMatchStates({});
     setScheduleVersion(SCHEDULE_VERSION);
+    saveFields({ schedule: s, scheduleVersion: SCHEDULE_VERSION, matchStates: {} });
   };
 
   // Reschedule: update court/time for a single match in the schedule array
   const rescheduleMatch = useCallback((id, changes) => {
     setSchedule(prev => prev.map(m => m.id === id ? { ...m, ...changes } : m));
   }, [setSchedule]);
+
 
   const filtered = useMemo(() =>
     schedule.filter(m =>
@@ -850,6 +871,9 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
     return Object.entries(map).sort((a,b)=>+a[0]-+b[0]);
   }, [filtered]);
 
+    
+    return koMatch ? koMatch.startMin : null;
+
   const byCourt = useMemo(() => {
     const map = {};
     for (let c=1; c<=7; c++) map[c]=[];
@@ -860,7 +884,9 @@ function ScheduleView({ teams, schedule, setSchedule, matchStates, setMatchState
 
   const byGroup = useMemo(() => {
     const map = {};
-    filtered.forEach(m => { const k=`${m.level}-${m.bracket}`; if (!map[k]) map[k]=[]; map[k].push(m); });
+    filtered.forEach(m => {
+const k=`${m.level}-${m.bracket}`; if (!map[k]) map[k]=[]; map[k].push(m);
+    });
     return map;
   }, [filtered]);
 
@@ -1209,9 +1235,7 @@ function KOMatchCard({ homeTeam, awayTeam, matchData, onUpdate, roundLabel, matc
 // ── Main KnockoutView ─────────────────────────────────
 function KnockoutView({ teams, schedule, matchStates }) {
   const [selectedLevel, setSelectedLevel] = useState("B");
-  // koFormats: { [level]: "final"|"sf"|"qf" }
   const [koFormats, setKoFormats] = useSharedState("koFormats", { B:"qf", C:"qf", D:"sf", E:"final" });
-  // koData: { [level]: { [matchKey]: { homeTeam, awayTeam, scoreHome, scoreAway, winner } } }
   const [koData, setKoData] = useSharedState("koData", {});
   const [showSeedModal,  setShowSeedModal]  = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
@@ -1703,6 +1727,7 @@ function PlayerView({ schedule, matchStates }) {
   const [filterCt, setFilterCt] = useState("ALL");
   const [search,   setSearch]   = useState("");
 
+
   const getStatus = m => (matchStates[m.id]?.matchStatus) || "pending";
 
   const ongoingMatches = useMemo(() =>
@@ -1722,6 +1747,9 @@ function PlayerView({ schedule, matchStates }) {
     filtered.forEach(m => { if (!map[m.startMin]) map[m.startMin]=[]; map[m.startMin].push(m); });
     return Object.entries(map).sort((a,b)=>+a[0]-+b[0]);
   }, [filtered]);
+
+    
+    return koMatch ? koMatch.startMin : null;
 
   const doneCount    = useMemo(() => schedule.filter(m => getStatus(m)==="done").length,    [schedule, matchStates]);
   const pendingCount = useMemo(() => schedule.filter(m => getStatus(m)==="pending").length,  [schedule, matchStates]);
@@ -1819,7 +1847,7 @@ function PlayerView({ schedule, matchStates }) {
         );
       })}
 
-      {filtered.length===0 && search && (
+       && (
         <div style={{textAlign:"center",padding:"40px 20px"}}>
           <div style={{fontSize:36,marginBottom:10}}>🔍</div>
           <div style={{color:C.muted}}>No matches found for "{search}"</div>
@@ -1877,17 +1905,24 @@ function App() {
   // ── Shared Firebase data ──
   const [teams,           setTeams]           = useSharedState("teams", INITIAL_TEAMS);
   const [scheduleVersion, setScheduleVersion] = useSharedState("scheduleVersion", "");
-  const [schedule,        setSchedule]        = useSharedState("schedule", []);
+  // If stored schedule is from an old version, start fresh immediately (before first render)
+  const [schedule,        setSchedule]        = useSharedState("schedule",
+    (() => {
+      try {
+        const sv = localStorage.getItem("ps_scheduleVersion");
+        const ver = sv ? JSON.parse(sv) : "";
+        if (ver !== SCHEDULE_VERSION) return [];
+        const s = localStorage.getItem("ps_schedule");
+        return s ? JSON.parse(s) : [];
+      } catch { return []; }
+    })()
+  );
   const [matchStates,     setMatchStates]      = useSharedState("matchStates", {});
 
-  // ── Clear stale schedule on version mismatch ──
-  useEffect(() => {
-    if (scheduleVersion !== "" && scheduleVersion !== SCHEDULE_VERSION) {
-      setSchedule([]);
-      setMatchStates({});
-      setScheduleVersion(SCHEDULE_VERSION);
-    }
-  }, [scheduleVersion]);
+  // ── Clear stale schedule on version mismatch (init only, not reactive) ──
+  // NOTE: Reactive clearing was removed because Firebase snapshots can echo back
+  // the old scheduleVersion after a regenerate, causing the new schedule to disappear.
+  // Stale data is cleared synchronously in the useState initializer above instead.
 
   // ── If URL forces a role but state drifted, correct it ──
   useEffect(() => {
